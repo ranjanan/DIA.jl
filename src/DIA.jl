@@ -54,16 +54,20 @@ end
 function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N}, b::Vector{Tv}) where {Tv,Ti,N}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
+    fill!(ret, zero(Tv))
     for x in d
         s = x.second
+        offset = x.first
         l = length(s)
         for j = 1:l
-            @inbounds ret[j] += s[j] * b[j] 
+            @inbounds ret[j] += s[j] * b[j + offset] 
         end
     end
     ret
 end
 
-end
+Base.Matrix(s::SparseMatrixDIA) = diagm(s.diags...)
+
+end # end module
 
         
