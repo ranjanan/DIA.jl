@@ -3,11 +3,14 @@ module DIA
 using SparseArrays
 using LinearAlgebra
 
-struct SparseMatrixDIA{Tv,Ti,N} <: AbstractSparseMatrix{Tv,Ti}
-    diags::NTuple{N, Pair{Ti,Vector{Tv}}}
+export SparseMatrixDIA
+
+struct SparseMatrixDIA{Tv,Ti,N,V<:AbstractVector{Tv}} <: AbstractSparseMatrix{Tv,Ti}
+    diags::NTuple{N, Pair{Ti,V}}
     m::Ti
     n::Ti
 end
+# SparseMatrixDIA(x::Pair{Ti,V<:AbstractVector{Tv}}) where {Ti,Tv,V} = SparseMatrixDIA((x,), length(x.second), length(x.second))
 Base.size(a::SparseMatrixDIA) = (a.m, a.n)
 function SparseArrays.nnz(a::SparseMatrixDIA)
     l = 0
@@ -31,7 +34,7 @@ function Base.getindex(a::SparseMatrixDIA{Tv,Ti,N}, i, j) where {Tv,Ti,N}
 end
 
 Base.show(io::IO, S::SparseMatrixDIA) = Base.show(convert(IOContext, io), S::SparseMatrixDIA)
-function Base.show(io::IOContext, S::SparseMatrixDIA{Tv,Ti,N}) where {Tv,Ti,N}
+function Base.show(io::IOContext, S::SparseMatrixDIA)
     
     println(io, summary(S))
     for x in S.diags
@@ -43,15 +46,17 @@ function Base.show(io::IOContext, S::SparseMatrixDIA{Tv,Ti,N}) where {Tv,Ti,N}
 end
 Base.display(S::SparseMatrixDIA) = Base.show(S)
 
-function Base.summary(S::SparseMatrixDIA{Tv,Ti,N}) where {Tv,Ti,N} 
+function Base.summary(S::SparseMatrixDIA{Tv,Ti,N,V}) where {Tv,Ti,N,V} 
     "$(S.m)×$(S.n) SparseMatrixDIA{$Tv,$Ti,$N} with $(length(S.diags)) diagonals: "
 end
 
-function Base.:*(S::SparseMatrixDIA{Tv,Ti,N}, b::Vector{Tv}) where {Tv,Ti,N}
+function Base.:*(S::SparseMatrixDIA{Tv,Ti,N,V}, b::Vector{Tv}) where {Tv,Ti,N,V}
     mul!(zeros(Tv, length(b)), S, b)
 end
 
-function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N}, b::Vector{Tv}) where {Tv,Ti,N}
+# Matrix Vector product 
+function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V}, 
+                            b::Vector{Tv}) where {Tv,Ti,N,V<:DenseVector}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
     fill!(ret, zero(Tv))
@@ -59,14 +64,63 @@ function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N}, b::Vec
         s = x.second
         offset = x.first
         l = length(s)
-        for j = 1:l
-            @inbounds ret[j] += s[j] * b[j + offset] 
+        if offset >= 0 
+            for j = 1:l
+                @inbounds ret[j] += s[j] * b[j + offset] 
+            end
+        else 
+            for j = 1:l
+                @inbounds ret[j-offset] += s[j] * b[j] 
+            end
         end
     end
     ret
 end
-
+function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V}, 
+                            b::Vector{Tv}) where {Tv,Ti,N,V<:SparseVector}
+    @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
+    d = S.diags
+    fill!(ret, zero(Tv))
+    for x in d
+        s = x.second
+        nzval = s.nzval
+        nzind = s.nzind
+        offset = x.first
+        l = length(s)
+        if offset >= 0 
+            for (idx,j) in enumerate(nzind)
+                @inbounds ret[j] += nzval[idx] * b[j + offset] 
+            end
+        else
+            for (idx,j) in enumerate(nzind)
+                @inbounds ret[j-offset] += nzval[idx] * b[j] 
+            end
+        end
+    end
+    ret
+end
+### Conversion 
 Base.Matrix(s::SparseMatrixDIA) = diagm(s.diags...)
+
+# TODO: Speed this up
+function SparseMatrixDIA(S::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
+    m,n = size(S)
+    s = Vector{Pair{Ti,SparseVector{Tv,Ti}}}()
+    # Add diagonals above
+    for i = 1:n
+        d = diag(S, i-1)
+        if nnz(d) != 0
+            push!(s, i-1 => d)
+        end
+    end
+    for i = -1:-1:-n
+        d = diag(S, i)
+        if nnz(d) != 0
+            push!(s, i => d)
+        end
+    end
+    SparseMatrixDIA(tuple(s...), m, n)
+end
 
 end # end module
 
