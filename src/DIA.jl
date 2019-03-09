@@ -5,7 +5,7 @@ using LinearAlgebra
 
 export SparseMatrixDIA
 
-struct SparseMatrixDIA{Tv,Ti,N,V<:AbstractVector{Tv}} <: AbstractSparseMatrix{Tv,Ti}
+struct SparseMatrixDIA{Tv,Ti,N,V<:AbstractArray{Tv}} <: AbstractSparseMatrix{Tv,Ti}
     diags::NTuple{N, Pair{Ti,V}}
     m::Ti
     n::Ti
