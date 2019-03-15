@@ -2,6 +2,8 @@ module DIA
 
 using SparseArrays
 using LinearAlgebra
+using CuArrays
+using CUDAnative
 
 export SparseMatrixDIA
 
@@ -76,6 +78,45 @@ function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V},
     end
     ret
 end
+
+# GPU Matvec
+function gpumatvec!(ret::CuVector, S::SparseMatrixDIA{Tv,Ti,N,V}, 
+                            b::CuVector) where {Tv,Ti,N,V}
+    @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
+    d = S.diags
+    cufill(ret, zero(Tv))
+    for x in d
+        s = x.second
+        offset = x.first
+        l = length(s)
+		@show l
+        if offset >= 0 
+			println("doing offset >= 0")
+            @cuda threads=256 blocks=ceil(Int,l/256) dot_add_with_offset1!(ret, s, b, offset) 
+        else 
+            @cuda threads=256 blocks=ceil(Int,l/256) dot_add_with_offset2!(ret, s, b, offset) 
+        end
+    end
+    ret
+end
+function dot_add_with_offset1!(ret, s, b, offset)
+    index = (blockIdx().s - 1) * blockDim().s + threadIdx().s
+    stride = blockDim().s * gridDim().s
+    for i = index:stride:length(s)
+        @inbounds ret[i] += s[j] * b[i+offset]
+    end
+    return nothing
+end
+function dot_add_with_offset2!(ret, s, b, offset)
+    index = (blockIdx().s - 1) * blockDim().s + threadIdx().s
+    stride = blockDim().s * gridDim().s
+    for i = index:stride:length(s)
+        @inbounds ret[i-offset] += s[j] * b[i]
+    end
+    return nothing
+end
+
+
 function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V}, 
                             b::Vector{Tv}) where {Tv,Ti,N,V<:SparseVector}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
@@ -121,6 +162,17 @@ function SparseMatrixDIA(S::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
     end
     SparseMatrixDIA(tuple(s...), m, n)
 end
+function CuArrays.cu(S::SparseMatrixDIA{Tv,Ti,N,V}) where {Tv,Ti,N,V}
+	m, n = size(S)
+	s = Vector{Pair{Ti,CuVector{Float32}}}(undef, N)
+	for (i,x) in enumerate(S.diags)
+		first = x.first
+		second = x.second
+		s[i] = first => cu(x.second)
+	end
+	SparseMatrixDIA(tuple(s...), m, n)
+end
+		
 
 end # end module
 
