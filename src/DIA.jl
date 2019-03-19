@@ -50,22 +50,26 @@ function Base.summary(S::SparseMatrixDIA{Tv,Ti,N,V}) where {Tv,Ti,N,V}
     "$(S.m)×$(S.n) SparseMatrixDIA{$Tv,$Ti,$N} with $(length(S.diags)) diagonals: "
 end
 
-function Base.:*(S::SparseMatrixDIA{Tv,Ti,N,V}, b::Vector{Tv}) where {Tv,Ti,N,V}
-    mul!(zeros(Tv, length(b)), S, b)
+function Base.:*(S::SparseMatrixDIA{Tv1,Ti,N,V}, b::Vector{Tv2}) where {Tv1,Tv2,Ti,N,V}
+    println("Calling the right thing1")
+    mul!(zeros(Tv2, length(b)), S, b)
 end
 
 # Matrix Vector product 
-function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V}, 
-                            b::Vector{Tv}) where {Tv,Ti,N,V<:DenseVector}
+function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,N,V}, 
+                            b::Vector{Tv2}) where {Tv1,Tv2, Ti,N,V<:DenseVector}
+    println("Calling the right thing2")
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
-    fill!(ret, zero(Tv))
+    fill!(ret, zero(Tv2))
     for x in d
         s = x.second
         offset = x.first
         l = length(s)
         if offset >= 0 
             for j = 1:l
+                display(s[j])
+                display(b[j+offset])
                 @inbounds ret[j] += s[j] * b[j + offset] 
             end
         else 
