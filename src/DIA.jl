@@ -22,15 +22,13 @@ end
 
 
 function Base.getindex(a::SparseMatrixDIA{Tv,Ti,N}, i, j) where {Tv,Ti,N}
-    if i == j
-        for x in a.diags
-            if x.first == 0
-                return x.second[i]
-            end
+    diff = j - i
+    for x in a.diags
+        if x.first == diff
+            return x.second[i]
         end
-    else 
-        return zero(Tv)
     end
+    return zero(Tv)
 end
 
 Base.show(io::IO, S::SparseMatrixDIA) = Base.show(convert(IOContext, io), S::SparseMatrixDIA)
