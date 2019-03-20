@@ -84,37 +84,53 @@ function gpumatvec!(ret::CuVector, S::SparseMatrixDIA{Tv,Ti,N,V},
                             b::CuVector) where {Tv,Ti,N,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
-    cufill(ret, zero(Tv))
+    fill!(ret, zero(Tv))
     for x in d
         s = x.second
         offset = x.first
         l = length(s)
-		@show l
         if offset >= 0 
-			println("doing offset >= 0")
-            @cuda threads=256 blocks=ceil(Int,l/256) dot_add_with_offset1!(ret, s, b, offset) 
+            @cuda threads=256 dot_add_with_offset1!(ret, s, b, offset) 
         else 
-            @cuda threads=256 blocks=ceil(Int,l/256) dot_add_with_offset2!(ret, s, b, offset) 
+            @cuda threads=256 dot_add_with_offset2!(ret, s, b, offset) 
         end
     end
     ret
 end
-function dot_add_with_offset1!(ret, s, b, offset)
-    index = (blockIdx().s - 1) * blockDim().s + threadIdx().s
-    stride = blockDim().s * gridDim().s
-    for i = index:stride:length(s)
-        @inbounds ret[i] += s[j] * b[i+offset]
+function dot_add_with_offset1!(y, x, z, c)
+    index = threadIdx().x 
+    stride = blockDim().x
+    for i = index:stride:length(x)
+        @inbounds y[i] += x[i] * z[i+c]
     end
     return nothing
 end
-function dot_add_with_offset2!(ret, s, b, offset)
-    index = (blockIdx().s - 1) * blockDim().s + threadIdx().s
-    stride = blockDim().s * gridDim().s
-    for i = index:stride:length(s)
-        @inbounds ret[i-offset] += s[j] * b[i]
+function dot_add_with_offset2!(y, x, z, c)
+    index = threadIdx().x 
+    stride = blockDim().x
+    for i = index:stride:length(x)
+        @inbounds y[i-c] += x[i] * z[i]
     end
     return nothing
 end
+
+# If you change the variable names, it gives me compilation error. Strange. 
+#=function dot_add_with_offset1!(ret, s, b)
+    index = threadIdx().s    # this example only requires linear indexing, so just use `x`
+    stride = blockDim().s
+    for i = index:stride:length(s)
+        @inbounds ret[i] += s[i] * b[i]
+    end
+    return nothing
+end
+function dot_add_with_offset2!(ret, s, b, offset)::nothing
+    index = (blockIdx().s - 1) * blockDim().s + threadIdx().s
+    stride = blockDim().s * gridDim().s
+    for i = index:stride:length(s)
+        @inbounds ret[i-offset] += s[i] * b[i]
+    end
+    return nothing
+end=#
 
 
 function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V}, 
