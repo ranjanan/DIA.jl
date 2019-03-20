@@ -26,7 +26,7 @@ function Base.getindex(a::SparseMatrixDIA{Tv,Ti,N}, i, j) where {Tv,Ti,N}
     diff = j - i
     for x in a.diags
         if x.first == diff
-            return x.second[i]
+            return x.second[j]
         end
     end
     return zero(Tv)
