@@ -53,7 +53,7 @@ function Base.summary(S::SparseMatrixDIA{Tv,Ti,N,V}) where {Tv,Ti,N,V}
 end
 
 function Base.:*(S::SparseMatrixDIA{Tv,Ti,N,V}, b::Vector{Tv}) where {Tv,Ti,N,V}
-    mul!(zeros(Tv, length(b)), S, b)
+    mul!(similar(b), S, b)
 end
 
 # Matrix Vector product 
@@ -80,7 +80,7 @@ function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V},
 end
 
 # GPU Matvec
-function gpumatvec!(ret::CuVector, S::SparseMatrixDIA{Tv,Ti,N,V}, 
+function LinearAlgebra.mul!(ret::CuVector, S::SparseMatrixDIA{Tv,Ti,N,V}, 
                             b::CuVector) where {Tv,Ti,N,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
