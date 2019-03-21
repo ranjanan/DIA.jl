@@ -110,11 +110,11 @@ function BLAS.gemv!(tA, alpha, A::SparseMatrixDIA{Tv1,Ti,N,V}, b::Vector{Tv2}, b
         l = length(s)
         if offset >= 0 
             for j = 1:l
-                @inbounds ret[j] += alpha * s[j] * beta * b[j + offset] 
+                @inbounds ret[j] = beta * ret[j] + alpha * s[j] * b[j + offset] 
             end
         else 
             for j = 1:l
-                @inbounds ret[j-offset] += alpha * s[j] * beta * b[j] 
+                @inbounds ret[j-offset] = beta * ret[j-offset] + alpha * s[j] * b[j] 
             end
         end
     end
