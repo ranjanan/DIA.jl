@@ -97,19 +97,19 @@ function LinearAlgebra.mul!(ret::CuVector, S::SparseMatrixDIA{Tv,Ti,N,V},
     end
     ret
 end
-function dot_add_with_offset1!(y, x, z, c)
+function dot_add_with_offset1!(y, x, z, c, alpha=1., beta=1.)
     index = threadIdx().x 
     stride = blockDim().x
     for i = index:stride:length(x)
-        @inbounds y[i] += x[i] * z[i+c]
+        @inbounds y[i] = beta * y[i] + alpha * x[i] * z[i+c]
     end
     return nothing
 end
-function dot_add_with_offset2!(y, x, z, c)
+function dot_add_with_offset2!(y, x, z, c, alpha=1., beta=1.0)
     index = threadIdx().x 
     stride = blockDim().x
     for i = index:stride:length(x)
-        @inbounds y[i-c] += x[i] * z[i]
+        @inbounds y[i-c] = beta * y[i-c] + alpha* x[i] * z[i]
     end
     return nothing
 end
@@ -173,6 +173,23 @@ function BLAS.gemv!(tA, alpha, S::SparseMatrixDIA{Tv1,Ti,N,V}, b::Vector{Tv2}, b
             for j = 1:l
                 @inbounds ret[j-offset] = beta * ret[j-offset] + alpha * s[j] * b[j] 
             end
+        end
+    end
+    ret
+end
+function BLAS.gemv!(tA, alpha, S::SparseMatrixDIA{Tv,Ti,N,V}, 
+                    b::CuVector, beta, ret::CuVector) where {Tv,Ti,N,V}
+    @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
+    d = S.diags
+    fill!(ret, zero(Tv))
+    for x in d
+        s = x.second
+        offset = x.first
+        l = length(s)
+        if offset >= 0 
+            @cuda threads=256 dot_add_with_offset1!(ret, s, b, offset, alpha, beta) 
+        else 
+            @cuda threads=256 dot_add_with_offset2!(ret, s, b, offset, alpha, beta) 
         end
     end
     ret
