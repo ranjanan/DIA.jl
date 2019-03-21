@@ -100,7 +100,7 @@ function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V},
     ret
 end
 
-function BLAS.gemv!(tA, alpha, A::SparseMatrixDIA{Tv1,Ti,N,V}, b::Vector{Tv2}, beta, ret::Vector{Tv2}) where {Tv1,Tv2,Ti,N,V}
+function BLAS.gemv!(tA, alpha, S::SparseMatrixDIA{Tv1,Ti,N,V}, b::Vector{Tv2}, beta, ret::Vector{Tv2}) where {Tv1,Tv2,Ti,N,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
     fill!(ret, zero(Tv2))
