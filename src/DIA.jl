@@ -99,6 +99,28 @@ function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V},
     end
     ret
 end
+
+function BLAS.gemv!(tA, alpha, A::SparseMatrixDIA{Tv1,Ti,N,V}, b::Vector{Tv2}, beta, ret::Vector{Tv2})
+    @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
+    d = S.diags
+    fill!(ret, zero(Tv2))
+    for x in d
+        s = x.second
+        offset = x.first
+        l = length(s)
+        if offset >= 0 
+            for j = 1:l
+                @inbounds ret[j] += alpha * s[j] * beta * b[j + offset] 
+            end
+        else 
+            for j = 1:l
+                @inbounds ret[j-offset] += alpha * s[j] * beta * b[j] 
+            end
+        end
+    end
+    ret
+end
+
 ### Conversion 
 Base.Matrix(s::SparseMatrixDIA) = diagm(s.diags...)
 
