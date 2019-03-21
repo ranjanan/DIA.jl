@@ -17,22 +17,22 @@ Base.size(a::SparseMatrixDIA) = (a.m, a.n)
 function SparseArrays.nnz(a::SparseMatrixDIA)
     l = 0
     for x in a.diags
-        l += length(x.second)
+        per = length(x.second[1])
+        l += length(x.second) * per
     end
     l
 end
 
 
 function Base.getindex(a::SparseMatrixDIA{Tv,Ti,N}, i, j) where {Tv,Ti,N}
-    if i == j
-        for x in a.diags
-            if x.first == 0
-                return x.second[i]
-            end
+    diff = j - i
+    ind = ifelse(diff > 0, i, j)
+    for x in a.diags
+        if x.first == diff
+            return x.second[ind]
         end
-    else 
-        return zero(Tv)
     end
+    return zero(Tv)
 end
 
 Base.show(io::IO, S::SparseMatrixDIA) = Base.show(convert(IOContext, io), S::SparseMatrixDIA)
@@ -57,11 +57,11 @@ function Base.:*(S::SparseMatrixDIA{Tv,Ti,N,V}, b::Vector{Tv}) where {Tv,Ti,N,V}
 end
 
 # Matrix Vector product 
-function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V}, 
-                            b::Vector{Tv}) where {Tv,Ti,N,V<:DenseVector}
+function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,N,V}, 
+                            b::Vector{Tv2}) where {Tv1,Tv2, Ti,N,V<:DenseVector}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
-    fill!(ret, zero(Tv))
+    fill!(ret, zero(Tv2))
     for x in d
         s = x.second
         offset = x.first
@@ -156,6 +156,28 @@ function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V},
     end
     ret
 end
+
+function BLAS.gemv!(tA, alpha, S::SparseMatrixDIA{Tv1,Ti,N,V}, b::Vector{Tv2}, beta, ret::Vector{Tv2}) where {Tv1,Tv2,Ti,N,V}
+    @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
+    d = S.diags
+    fill!(ret, zero(Tv2))
+    for x in d 
+        s = x.second
+        offset = x.first
+        l = length(s)
+        if offset >= 0 
+            for j = 1:l
+                @inbounds ret[j] = beta * ret[j] + alpha * s[j] * b[j + offset] 
+            end
+        else 
+            for j = 1:l
+                @inbounds ret[j-offset] = beta * ret[j-offset] + alpha * s[j] * b[j] 
+            end
+        end
+    end
+    ret
+end
+
 ### Conversion 
 Base.Matrix(s::SparseMatrixDIA) = diagm(s.diags...)
 
