@@ -80,11 +80,11 @@ function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,N,V},
 end
 
 # GPU Matvec
-function LinearAlgebra.mul!(ret::CuVector, S::SparseMatrixDIA{Tv,Ti,N,V}, 
-                            b::CuVector) where {Tv,Ti,N,V}
+function LinearAlgebra.mul!(ret::CuVector, S::SparseMatrixDIA{Tv1,Ti,N,V}, 
+                            b::CuVector{Tv2}) where {Tv1,Tv2,Ti,N,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
-    fill!(ret, zero(Tv))
+    fill!(ret, zero(Tv2))
     for x in d
         s = x.second
         offset = x.first
@@ -219,7 +219,8 @@ function SparseMatrixDIA(S::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
 end
 function CuArrays.cu(S::SparseMatrixDIA{Tv,Ti,N,V}) where {Tv,Ti,N,V}
 	m, n = size(S)
-	s = Vector{Pair{Ti,CuVector{Float32}}}(undef, N)
+    R = figure_out_type(V)
+	s = Vector{Pair{Ti,R}}(undef, N)
 	for (i,x) in enumerate(S.diags)
 		first = x.first
 		second = x.second
@@ -227,6 +228,8 @@ function CuArrays.cu(S::SparseMatrixDIA{Tv,Ti,N,V}) where {Tv,Ti,N,V}
 	end
 	SparseMatrixDIA(tuple(s...), m, n)
 end
+figure_out_type(::Type{Vector{Float64}}) = CuVector{Float32}
+figure_out_type(::Type{Vector{S}}) where S = CuVector{S}
 		
 
 end # end module
