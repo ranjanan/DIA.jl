@@ -230,8 +230,5 @@ function CuArrays.cu(S::SparseMatrixDIA{Tv,Ti,N,V}) where {Tv,Ti,N,V}
 end
 figure_out_type(::Type{Vector{Float64}}) = CuVector{Float32}
 figure_out_type(::Type{Vector{S}}) where S = CuVector{S}
-		
 
 end # end module
-
-        
