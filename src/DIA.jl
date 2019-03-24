@@ -80,19 +80,38 @@ function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,N,V},
 end
 
 # GPU Matvec
-function LinearAlgebra.mul!(ret::CuVector, S::SparseMatrixDIA{Tv1,Ti,N,V}, 
+function LinearAlgebra.mul!(ret::CuVector, S::SparseMatrixDIA{Tv1,Ti,N,V},
                             b::CuVector{Tv2}) where {Tv1,Tv2,Ti,N,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
-    fill!(ret, zero(Tv2))
+    #fill!(ret, zero(Tv2))
+
+    function kernel_1(ret, strip, b, offset)  ## Case of offset >=0
+        i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+
+        if i <= length(strip)
+            @inbounds ret[i] += strip[i] * b[i+offset]
+        end
+
+        return
+    end
+    function kernel_2(ret, strip, b, offset) ## Case of offset < 0
+        i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+
+        if i <= length(strip)
+            @inbounds ret[i-offset] += strip[i] * b[i]
+        end
+
+        return
+    end
+
     for x in d
         s = x.second
         offset = x.first
-        l = length(s)
-        if offset >= 0 
-            @cuda threads=256 dot_add_with_offset1!(ret, s, b, offset) 
-        else 
-            @cuda threads=256 dot_add_with_offset2!(ret, s, b, offset) 
+        if offset >= 0
+            @cuda threads=256 blocks=ceil.(Int, length(s)/256) kernel_1(ret, s, b, offset)
+        else
+            @cuda threads=256 blocks=ceil.(Int, length(s)/256) kernel_2(ret, s, b, offset)
         end
     end
     ret
