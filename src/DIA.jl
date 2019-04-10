@@ -187,7 +187,7 @@ function BLAS.gemv!(tA::Char, alpha::Number, S::SparseMatrixDIA{Tv1,Ti,N,V}, b::
     end
     ret
 end
-function BLAS.gemv!(tA::Char, alpha, S::SparseMatrixDIA{Tv,Ti,N,V},
+#=function BLAS.gemv!(tA::Char, alpha, S::SparseMatrixDIA{Tv,Ti,N,V},
                     b::CuVector, beta, ret::CuVector) where {Tv,Ti,N,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
@@ -213,7 +213,8 @@ function BLAS.gemv!(tA::Char, alpha, S::SparseMatrixDIA{Tv,Ti,N,V},
         end
     end
     ret
-end
+end=#
+## Which is better? above or below? or is it just the same?
 
 function BLAS.gemv!(tA::Char, alpha, S::SparseMatrixDIA{Tv,Ti,N,V},
                     b::CuVector, beta, ret::CuVector) where {Tv,Ti,N,V}
