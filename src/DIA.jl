@@ -37,18 +37,18 @@ end
 
 Base.show(io::IO, S::SparseMatrixDIA) = Base.show(convert(IOContext, io), S::SparseMatrixDIA)
 function Base.show(io::IOContext, S::SparseMatrixDIA)
-    
+
     println(io, summary(S))
     for x in S.diags
         print(io, "Diagonal $(x.first): ")
         print(io, x.second)
         print(io, '\n')
     end
-    
+
 end
 Base.display(S::SparseMatrixDIA) = Base.show(S)
 
-function Base.summary(S::SparseMatrixDIA{Tv,Ti,N,V}) where {Tv,Ti,N,V} 
+function Base.summary(S::SparseMatrixDIA{Tv,Ti,N,V}) where {Tv,Ti,N,V}
     "$(S.m)×$(S.n) SparseMatrixDIA{$Tv,$Ti,$N} with $(length(S.diags)) diagonals: "
 end
 
@@ -56,8 +56,8 @@ function Base.:*(S::SparseMatrixDIA{Tv,Ti,N,V}, b::Vector{Tv}) where {Tv,Ti,N,V}
     mul!(similar(b), S, b)
 end
 
-# Matrix Vector product 
-function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,N,V}, 
+# Matvec
+function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,N,V},
                             b::Vector{Tv2}) where {Tv1,Tv2, Ti,N,V<:DenseVector}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
@@ -66,39 +66,49 @@ function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,N,V},
         s = x.second
         offset = x.first
         l = length(s)
-        if offset >= 0 
+        if offset >= 0
             for j = 1:l
-                @inbounds ret[j] += s[j] * b[j + offset] 
+                @inbounds ret[j] += s[j] * b[j + offset]
             end
-        else 
+        else
             for j = 1:l
-                @inbounds ret[j-offset] += s[j] * b[j] 
+                @inbounds ret[j-offset] += s[j] * b[j]
             end
+        end
+    end
+    ret
+end
+# GPU mul!
+function LinearAlgebra.mul!(ret::CuVector, S::SparseMatrixDIA{Tv1,Ti,N,V},
+                            b::CuVector{Tv2}) where {Tv1,Tv2,Ti,N,V}
+    @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
+    d = S.diags
+    fill!(ret, zero(Tv2))
+    function kernel_1(ret, strip, b, offset)  ## Case of offset >=0
+        i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+        if i <= length(strip) @inbounds ret[i] += strip[i] * b[i+offset] end
+        return
+    end
+    function kernel_2(ret, strip, b, offset) ## Case of offset < 0
+        i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+        if i <= length(strip) @inbounds ret[i-offset] += strip[i] * b[i] end
+        return
+    end
+
+    for x in d
+        s = x.second
+        offset = x.first
+        if offset >= 0
+            @cuda threads=256 blocks=ceil(Int, length(s)/256) kernel_1(ret, s, b, offset)
+        else
+            @cuda threads=256 blocks=ceil(Int, length(s)/256) kernel_2(ret, s, b, offset)
         end
     end
     ret
 end
 
-# GPU Matvec
-function LinearAlgebra.mul!(ret::CuVector, S::SparseMatrixDIA{Tv1,Ti,N,V}, 
-                            b::CuVector{Tv2}) where {Tv1,Tv2,Ti,N,V}
-    @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
-    d = S.diags
-    fill!(ret, zero(Tv2))
-    for x in d
-        s = x.second
-        offset = x.first
-        l = length(s)
-        if offset >= 0 
-            @cuda threads=256 dot_add_with_offset1!(ret, s, b, offset) 
-        else 
-            @cuda threads=256 dot_add_with_offset2!(ret, s, b, offset) 
-        end
-    end
-    ret
-end
-function dot_add_with_offset1!(y, x, z, c, alpha=1., beta=1.)
-    index = threadIdx().x 
+#=function dot_add_with_offset1!(y, x, z, c, alpha=1., beta=1.)
+    index = threadIdx().x
     stride = blockDim().x
     for i = index:stride:length(x)
         @inbounds y[i] = beta * y[i] + alpha * x[i] * z[i+c]
@@ -106,7 +116,7 @@ function dot_add_with_offset1!(y, x, z, c, alpha=1., beta=1.)
     return nothing
 end
 function dot_add_with_offset2!(y, x, z, c, alpha=1., beta=1.0)
-    index = threadIdx().x 
+    index = threadIdx().x
     stride = blockDim().x
     for i = index:stride:length(x)
         @inbounds y[i-c] = beta * y[i-c] + alpha* x[i] * z[i]
@@ -114,8 +124,8 @@ function dot_add_with_offset2!(y, x, z, c, alpha=1., beta=1.0)
     return nothing
 end
 
-# If you change the variable names, it gives me compilation error. Strange. 
-#=function dot_add_with_offset1!(ret, s, b)
+# If you change the variable names, it gives me compilation error. Strange.
+function dot_add_with_offset1!(ret, s, b)
     index = threadIdx().s    # this example only requires linear indexing, so just use `x`
     stride = blockDim().s
     for i = index:stride:length(s)
@@ -133,7 +143,7 @@ function dot_add_with_offset2!(ret, s, b, offset)::nothing
 end=#
 
 
-function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V}, 
+function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V},
                             b::Vector{Tv}) where {Tv,Ti,N,V<:SparseVector}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
@@ -144,58 +154,95 @@ function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V},
         nzind = s.nzind
         offset = x.first
         l = length(s)
-        if offset >= 0 
+        if offset >= 0
             for (idx,j) in enumerate(nzind)
-                @inbounds ret[j] += nzval[idx] * b[j + offset] 
+                @inbounds ret[j] += nzval[idx] * b[j + offset]
             end
         else
             for (idx,j) in enumerate(nzind)
-                @inbounds ret[j-offset] += nzval[idx] * b[j] 
+                @inbounds ret[j-offset] += nzval[idx] * b[j]
             end
         end
     end
-    ret
+ret
 end
 
-function BLAS.gemv!(tA, alpha, S::SparseMatrixDIA{Tv1,Ti,N,V}, b::Vector{Tv2}, beta, ret::Vector{Tv2}) where {Tv1,Tv2,Ti,N,V}
+function BLAS.gemv!(tA::Char, alpha::Number, S::SparseMatrixDIA{Tv1,Ti,N,V}, b::Vector{Tv2}, beta::Number, ret::Vector{Tv2}) where {Tv1,Tv2,Ti,N,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
-    fill!(ret, zero(Tv2))
-    for x in d 
-        s = x.second
-        offset = x.first
-        l = length(s)
-        if offset >= 0 
-            for j = 1:l
-                @inbounds ret[j] = beta * ret[j] + alpha * s[j] * b[j + offset] 
-            end
-        else 
-            for j = 1:l
-                @inbounds ret[j-offset] = beta * ret[j-offset] + alpha * s[j] * b[j] 
-            end
-        end
-    end
-    ret
-end
-function BLAS.gemv!(tA, alpha, S::SparseMatrixDIA{Tv,Ti,N,V}, 
-                    b::CuVector, beta, ret::CuVector) where {Tv,Ti,N,V}
-    @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
-    d = S.diags
-    fill!(ret, zero(Tv))
+    rmul!(ret, beta)
     for x in d
         s = x.second
         offset = x.first
         l = length(s)
-        if offset >= 0 
-            @cuda threads=256 dot_add_with_offset1!(ret, s, b, offset, alpha, beta) 
-        else 
-            @cuda threads=256 dot_add_with_offset2!(ret, s, b, offset, alpha, beta) 
+        if offset >= 0
+            for j = 1:l
+                @inbounds ret[j] += alpha * s[j] * b[j + offset]
+            end
+        else
+            for j = 1:l
+                @inbounds ret[j-offset] += alpha * s[j] * b[j]
+            end
+        end
+    end
+    ret
+end
+function BLAS.gemv!(tA::Char, alpha, S::SparseMatrixDIA{Tv,Ti,N,V},
+                    b::CuVector, beta, ret::CuVector) where {Tv,Ti,N,V}
+    @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
+    d = S.diags
+    rmul!(ret, beta)
+    function kernel_1(α, strip, b, ret, offset)  ## Case of offset >=0
+        i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+        if i <= length(strip) @inbounds ret[i] += α * strip[i] * b[i+offset] end
+        return
+    end
+    function kernel_2(α, strip, b, ret, offset) ## Case of offset < 0
+        i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+        if i <= length(strip) @inbounds ret[i-offset] += α * strip[i] * b[i] end
+        return
+    end
+    for x in d
+        s = x.second
+        offset = x.first
+        l = length(s)
+        if offset >= 0
+            @cuda threads=256 blocks=ceil(Int, length(s)/256) kernel_1(alpha, s, b, ret, offset)
+        else
+            @cuda threads=256 blocks=ceil(Int, length(s)/256) kernel_2(alpha, s, b, ret, offset)
         end
     end
     ret
 end
 
-### Conversion 
+function BLAS.gemv!(tA::Char, alpha, S::SparseMatrixDIA{Tv,Ti,N,V},
+                    b::CuVector, beta, ret::CuVector) where {Tv,Ti,N,V}
+    @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
+    d = S.diags
+    rmul!(ret, beta)
+    function kernel(α, strip, b, ret)  ## Case of offset >=0
+        i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+        if i <= length(strip) @inbounds ret[i] += α * strip[i] * b[i] end
+	return
+    end
+    for x in d
+        s = x.second
+        offset = x.first
+        l = length(s)
+        if offset >= 0
+            @cuda threads=256 blocks=ceil(Int, length(s)/256) kernel(alpha, s, view(b, offset+1:S.n), view(ret, 1:S.n-offset))
+        else
+            @cuda threads=256 blocks=ceil(Int, length(s)/256) kernel(alpha, s, view(b, 1:S.n+offset), view(ret, 1-offset:S.n))
+        end
+    end
+    ret
+end
+
+
+
+
+
+### Conversion
 Base.Matrix(s::SparseMatrixDIA) = diagm(s.diags...)
 
 # TODO: Speed this up
@@ -218,15 +265,15 @@ function SparseMatrixDIA(S::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
     SparseMatrixDIA(tuple(s...), m, n)
 end
 function CuArrays.cu(S::SparseMatrixDIA{Tv,Ti,N,V}) where {Tv,Ti,N,V}
-	m, n = size(S)
+        m, n = size(S)
     R = figure_out_type(V)
-	s = Vector{Pair{Ti,R}}(undef, N)
-	for (i,x) in enumerate(S.diags)
-		first = x.first
-		second = x.second
-		s[i] = first => cu(x.second)
-	end
-	SparseMatrixDIA(tuple(s...), m, n)
+        s = Vector{Pair{Ti,R}}(undef, N)
+        for (i,x) in enumerate(S.diags)
+                first = x.first
+                second = x.second
+                s[i] = first => cu(x.second)
+        end
+        SparseMatrixDIA(tuple(s...), m, n)
 end
 figure_out_type(::Type{Vector{Float64}}) = CuVector{Float32}
 figure_out_type(::Type{Vector{S}}) where S = CuVector{S}
