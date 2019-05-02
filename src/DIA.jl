@@ -216,8 +216,8 @@ end
 end=#
 ## Which is better? above or below? or is it just the same?
 
-function BLAS.gemv!(tA::Char, alpha, S::SparseMatrixDIA{Tv,Ti,N,V},
-                    b::CuVector, beta, ret::CuVector) where {Tv,Ti,N,V}
+function BLAS.gemv!(tA::Char, alpha::Float64, S::SparseMatrixDIA{Tv,Ti,N,V},
+                    b::CuVector, beta::Float64, ret::CuVector) where {Tv,Ti,N,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
     rmul!(ret, beta)
