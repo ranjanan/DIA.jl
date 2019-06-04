@@ -216,8 +216,30 @@ end
 end=#
 ## Which is better? above or below? or is it just the same?
 
-function BLAS.gemv!(tA::Char, alpha::Tv, S::SparseMatrixDIA{Tv,Ti,N,V},
-                    b::CuVector{Tv}, beta::Tv, ret::CuVector{Tv}) where {Tv,Ti,N,V}
+function BLAS.gemv!(tA::Char, alpha::Float64, S::SparseMatrixDIA{Float64,Ti,N,V},
+                    b::CuVector{Float64}, beta::Float64, ret::CuVector{Float64}) where {Ti,N,V}
+    @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
+    d = S.diags
+    rmul!(ret, beta)
+    function kernel(α, strip, b, ret)  ## Case of offset >=0
+        i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+        if i <= length(strip) @inbounds ret[i] += α * strip[i] * b[i] end
+	return
+    end
+    for x in d
+        s = x.second
+        offset = x.first
+        l = length(s)
+        if offset >= 0
+            @cuda threads=256 blocks=ceil(Int, length(s)/256) kernel(alpha, s, view(b, offset+1:S.n), view(ret, 1:S.n-offset))
+        else
+            @cuda threads=256 blocks=ceil(Int, length(s)/256) kernel(alpha, s, view(b, 1:S.n+offset), view(ret, 1-offset:S.n))
+        end
+    end
+    ret
+end
+function BLAS.gemv!(tA::Char, alpha::Float32, S::SparseMatrixDIA{Float32,Ti,N,V},
+                    b::CuVector{Float32}, beta::Float32, ret::CuVector{Float32}) where {Ti,N,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
     rmul!(ret, beta)
