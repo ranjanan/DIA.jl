@@ -14,7 +14,7 @@ struct SparseMatrixDIA{Tv,Ti,V<:AbstractArray{Tv}} <: AbstractSparseMatrix{Tv,Ti
 end
 
 function SparseMatrixDIA(x::NTuple{N,Pair{Ti,V}}, m::Ti, n::Ti) where {Ti,Tv,N,V<:AbstractArray{Tv}}
-	SparseMatrixDIA(Array(x), m, n)
+	SparseMatrixDIA(collect(x), m, n)
 end
 
 # SparseMatrixDIA(x::Pair{Ti,V<:AbstractVector{Tv}}) where {Ti,Tv,V} = SparseMatrixDIA((x,), length(x.second), length(x.second))
