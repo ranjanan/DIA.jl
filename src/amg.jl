@@ -1,4 +1,4 @@
-using CUDAnative, DIA
+import AlgebraicMultigrid: gs!
 
 function _gs_diag!(offset, diag, x, i)
         if   offset<0 x[i] -= diag[i+offset] * x[i+offset] ## i+offset should be >0
@@ -19,11 +19,9 @@ function _gs!(A::SparseMatrixDIA, b, x, ind) ## Performs GS on subset ind ⊂ 1:
         end
         _div_cuind!(x, A.diags[length(A.diags)>>1 + 1].second, ind) ### temp because length(A.diags)>>1+1 is the main diagonal
 end
-function gs!(A::SparseMatrixDIA, b::CuVector, x::CuVector)
-
-
-
-
+function gs!(A::SparseMatrixDIA, b::CuVector, x::CuVector; ind = CuVector{Float32}())
+	_gs(A, b, x, ind)
+end
 
 
 ### Copy and Divide with CuArray index (red or black)
