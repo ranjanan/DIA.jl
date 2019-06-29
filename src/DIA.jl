@@ -7,13 +7,20 @@ using CUDAnative
 
 export SparseMatrixDIA
 
-struct SparseMatrixDIA{Tv,Ti,N,V<:AbstractArray{Tv}} <: AbstractSparseMatrix{Tv,Ti}
-    diags::NTuple{N, Pair{Ti,V}}
+struct SparseMatrixDIA{Tv,Ti,V<:AbstractArray{Tv}} <: AbstractSparseMatrix{Tv,Ti}
+    diags::Vector{Pair{Ti,V}}
     m::Ti
     n::Ti
 end
+
+function SparseMatrixDIA(x::NTuple{N,Pair{Ti,V}}, m::Ti, n::Ti) where {Ti,Tv,N,V<:AbstractArray{Tv}}
+	SparseMatrixDIA(Array(x), m, n)
+end
+
 # SparseMatrixDIA(x::Pair{Ti,V<:AbstractVector{Tv}}) where {Ti,Tv,V} = SparseMatrixDIA((x,), length(x.second), length(x.second))
+
 Base.size(a::SparseMatrixDIA) = (a.m, a.n)
+
 function SparseArrays.nnz(a::SparseMatrixDIA)
     l = 0
     for x in a.diags
@@ -41,23 +48,23 @@ function Base.show(io::IOContext, S::SparseMatrixDIA)
     println(io, summary(S))
     for x in S.diags
         print(io, "Diagonal $(x.first): ")
-        print(io, x.second)
+        print(IOContext(io, :limit => true, :compact => true), x.second)
         print(io, '\n')
     end
 
 end
 Base.display(S::SparseMatrixDIA) = Base.show(S)
 
-function Base.summary(S::SparseMatrixDIA{Tv,Ti,N,V}) where {Tv,Ti,N,V}
-    "$(S.m)×$(S.n) SparseMatrixDIA{$Tv,$Ti,$N} with $(length(S.diags)) diagonals: "
+function Base.summary(S::SparseMatrixDIA{Tv,Ti,V}) where {Tv,Ti,V}
+    "$(S.m)×$(S.n) SparseMatrixDIA{$Tv,$Ti} with $(length(S.diags)) diagonals: "
 end
 
-function Base.:*(S::SparseMatrixDIA{Tv,Ti,N,V}, b::Vector{Tv}) where {Tv,Ti,N,V}
+function Base.:*(S::SparseMatrixDIA{Tv,Ti,V}, b::Vector{Tv}) where {Tv,Ti,V}
     mul!(similar(b), S, b)
 end
 
 # Matvec
-function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,N,V},
+function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,V},
                             b::Vector{Tv2}) where {Tv1,Tv2, Ti,N,V<:DenseVector}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
@@ -79,7 +86,7 @@ function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,N,V},
     ret
 end
 # GPU mul!
-function LinearAlgebra.mul!(ret::CuVector, S::SparseMatrixDIA{Tv1,Ti,N,V},
+function LinearAlgebra.mul!(ret::CuVector, S::SparseMatrixDIA{Tv1,Ti,V},
                             b::CuVector{Tv2}) where {Tv1,Tv2,Ti,N,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
@@ -143,8 +150,8 @@ function dot_add_with_offset2!(ret, s, b, offset)::nothing
 end=#
 
 
-function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V},
-                            b::Vector{Tv}) where {Tv,Ti,N,V<:SparseVector}
+function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,V},
+                            b::Vector{Tv}) where {Tv,Ti,V<:SparseVector}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
     fill!(ret, zero(Tv))
@@ -167,7 +174,7 @@ function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,N,V},
 ret
 end
 
-function BLAS.gemv!(tA::Char, alpha::Number, S::SparseMatrixDIA{Tv1,Ti,N,V}, b::Vector{Tv2}, beta::Number, ret::Vector{Tv2}) where {Tv1,Tv2,Ti,N,V}
+function BLAS.gemv!(tA::Char, alpha::Number, S::SparseMatrixDIA{Tv1,Ti,V}, b::Vector{Tv2}, beta::Number, ret::Vector{Tv2}) where {Tv1,Tv2,Ti,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
     rmul!(ret, beta)
@@ -216,8 +223,8 @@ end
 end=#
 ## Which is better? above or below? or is it just the same?
 
-function BLAS.gemv!(tA::Char, alpha::Float64, S::SparseMatrixDIA{Float64,Ti,N,V},
-                    b::CuVector{Float64}, beta::Float64, ret::CuVector{Float64}) where {Ti,N,V}
+function BLAS.gemv!(tA::Char, alpha::Float64, S::SparseMatrixDIA{Float64,Ti,V},
+                    b::CuVector{Float64}, beta::Float64, ret::CuVector{Float64}) where {Ti,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
     rmul!(ret, beta)
@@ -238,8 +245,8 @@ function BLAS.gemv!(tA::Char, alpha::Float64, S::SparseMatrixDIA{Float64,Ti,N,V}
     end
     ret
 end
-function BLAS.gemv!(tA::Char, alpha::Float32, S::SparseMatrixDIA{Float32,Ti,N,V},
-                    b::CuVector{Float32}, beta::Float32, ret::CuVector{Float32}) where {Ti,N,V}
+function BLAS.gemv!(tA::Char, alpha::Float32, S::SparseMatrixDIA{Float32,Ti,V},
+                    b::CuVector{Float32}, beta::Float32, ret::CuVector{Float32}) where {Ti,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
     rmul!(ret, beta)
@@ -287,16 +294,16 @@ function SparseMatrixDIA(S::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
     end
     SparseMatrixDIA(tuple(s...), m, n)
 end
-function CuArrays.cu(S::SparseMatrixDIA{Tv,Ti,N,V}) where {Tv,Ti,N,V}
+function CuArrays.cu(S::SparseMatrixDIA{Tv,Ti,V}) where {Tv,Ti,V}
         m, n = size(S)
     R = figure_out_type(V)
-        s = Vector{Pair{Ti,R}}(undef, N)
+        s = Vector{Pair{Ti,R}}(undef, length(S.diags))
         for (i,x) in enumerate(S.diags)
                 first = x.first
                 second = x.second
                 s[i] = first => cu(x.second)
         end
-        SparseMatrixDIA(tuple(s...), m, n)
+        SparseMatrixDIA(s, m, n)
 end
 figure_out_type(::Type{Vector{Float64}}) = CuVector{Float32}
 figure_out_type(::Type{Vector{S}}) where S = CuVector{S}
