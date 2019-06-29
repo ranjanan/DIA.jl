@@ -326,4 +326,8 @@ end
 figure_out_type(::Type{Vector{Float64}}) = CuVector{Float32}
 figure_out_type(::Type{Vector{S}}) where S = CuVector{S}
 
+function SparseMatrixCSC(S::SparseMatrixDIA{Tv,Ti,V}) where {Tv,Ti}
+	spdiagm(S.diags...)
+end
+
 end # end module
