@@ -1,9 +1,10 @@
 ### Conversion
+
 Base.Matrix(s::SparseMatrixDIA) = diagm(s.diags...)
-SparseMatrixCSC(S::SparseMatrixDIA{Tv,Ti,V}) where {Tv,Ti,V} = spdiagm(S.diags...)
+SparseArrays.SparseMatrixCSC(S::SparseMatrixDIA{Tv,Ti,V}) where {Tv,Ti,V} = spdiagm(S.diags...)
 
 # TODO: Speed this up
-function SparseMatrixDIA(S::SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
+function SparseMatrixDIA(S::SparseArrays.SparseMatrixCSC{Tv,Ti}) where {Tv,Ti}
     m,n = size(S)
     s = Vector{Pair{Ti,Vector{Tv}}}()
     # Add diagonals above
