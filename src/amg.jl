@@ -56,7 +56,7 @@ end
 
 function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit, indexing) where {T, TF, CuVector}
 	coarse_size = ceil.(Int64, gridsize ./ divunit)
-	ind_f, ind_t, weights = cuzeros(Int64, prod(coarse_size)), cuzeros(Int64, prod(coarse_size)), cuzeros(T, prod(coarse_size))
+	ind_f, ind_t, weights = cuzeros(Int64, prod(gridsize)), cuzeros(Int64, prod(gridsize)), cuzeros(T, prod(gridsize))
 	
 	function kernel(indexing, ind_f, ind_t, weights, gridsize, divunit, coarse_size)
 		i = (blockIdx().x-1) * blockDim().x + threadIdx().x
@@ -68,7 +68,7 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit,
 			nd_coarse = indexing(coarse_size..., i2, j2, k2)
 			ind_f[nd] = nd
 			ind_t[nd] = nd_coarse
-			weights[nd] = 1 # https://calcul.math.cnrs.fr/attachments/spip/IMG/pdf/aggamgtut_notay.pdf page 56
+			weights[nd] = 1.0 # https://calcul.math.cnrs.fr/attachments/spip/IMG/pdf/aggamgtut_notay.pdf page 56
 		end
 		return nothing
 	end
