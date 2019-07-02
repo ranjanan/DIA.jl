@@ -55,7 +55,7 @@ function mul!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
 end		
 
 function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit, indexing) where {T, TF, CuVector}
-	coarse_size = ceil(Int64, gridsize ./ divunit)
+	coarse_size = ceil.(Int64, gridsize ./ divunit)
 	ind_f, ind_t, weights = cuzeros(Int64, prod(coarse_size)), cuzeros(Int64, prod(coarse_size)), cuzeros(T, prod(coarse_size))
 	
 	function kernel(indexing, ind_f, ind_t, weights, gridsize, divunit, coarse_size)
