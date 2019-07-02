@@ -92,7 +92,7 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit,
 	return P, R
 end
 
-function 
+#function 
 
 
 
