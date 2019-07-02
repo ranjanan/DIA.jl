@@ -37,6 +37,56 @@ function gs!(A::SparseMatrixDIA, b::CuVector, x::CuVector; ind1=CuArray(1:2:leng
 	_gs!(A, b, x, ind2)
 end
 
+###### Multilevel construction
+struct PR_op{T}
+	ind_from::AbstractVector{Int64} 
+	ind_to::AbstractVector{Int64}
+	weights::AbstractVector{T} ## All three vectors should have same length(length of finer grid)
+end
+function mul!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
+	function kernel(from, to, indf, indt, w)
+		i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+		if i<=length(from)
+			to[indt[i]] += w[i] * from[indf[i]]
+		end
+		return
+	end
+	@cuda threads=256 blocks=ceil(Int, length(P.ind_from)/256) kernel(from, to, P.ind_from, P.ind_to, P.weights)
+end		
+
+function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit, indexing) where {T, CuVector}
+	coarse_size = ceil(Int64, gridsize ./ divunit)
+	ind_f, ind_t, weights = cuzeros(Int64, prod(coarse_size)), cuzeros(Int64, prod(coarse_size)), cuzeros(T, prod(coarse_size))
+	
+	function kernel(indexing, ind_f, ind_t, weights, gridsize, divunit, coarse_size)
+		i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+		j = (blockIdx().y-1) * blockDim().y + threadIdx().y
+		k = (blockIdx().z-1) * blockDim().z + threadIdx().z
+		if i<=gridsize[1] && j<=gridsize[2] && k<=gridsize[3]
+			i2, j2, k2 = ceil.(Int, (i, j, k)./divunit)
+			nd = indexing(gridsize..., i, j, k)
+			nd_coarse = indexing(coarse_size..., i2, j2, k2)
+			ind_f[nd] = nd
+			ind_t[nd] = nd_coarse
+			weights[nd] = 1 # https://calcul.math.cnrs.fr/attachments/spip/IMG/pdf/aggamgtut_notay.pdf page 56
+		end
+		return nothing
+	end
+
+	max_threads = 256
+	threads_x   = min(max_threads, gridsize[1])
+	threads_y   = min(max_threads ÷ threads_x, gridsize[2])
+    	threads_z   = min(max_threads ÷ threads_x ÷ threads_y, gridsize[3])
+    	threads     = (threads_x, threads_y, threads_z)
+    	blocks      = ceil.(Int, gridsize ./ threads)
+	@cuda threads=threads blocks=blocks kernel(indexing, ind_f, ind_t, weights, gridsize, divunit, coarse_size)
+
+	P = PR_op(ind_f, ind_t, weights)
+	R = PR_op(ind_t, ind_f, weights)
+
+	return P, R
+end
+
 
 
 
