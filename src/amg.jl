@@ -52,11 +52,11 @@ function mul!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
 	function kernel(from, to, indf, indt, w)
 		i = (blockIdx().x-1) * blockDim().x + threadIdx().x
 		if i<=length(indf)
-			to[indt[i]] += w[i] * from[indf[i]]
+			@atomic to[indt[i]] += w[i] * from[indf[i]]
 		end
 		return
 	end
-	@cuda threads=256 blocks=ceil(Int, length(P.ind_from)/256) kernel(from, to, P.ind_from, P.ind_to, P.weights)
+	@cuda threads=64 blocks=ceil(Int, length(P.ind_from)/64) kernel(from, to, P.ind_from, P.ind_to, P.weights)
 end		
 
 function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit, indexing) where {T, TF, CuVector}
@@ -91,6 +91,8 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit,
 
 	return P, R
 end
+
+function 
 
 
 
