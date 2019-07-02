@@ -46,7 +46,7 @@ end
 function mul!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
 	function kernel(from, to, indf, indt, w)
 		i = (blockIdx().x-1) * blockDim().x + threadIdx().x
-		if i<=length(from)
+		if i<=length(indf)
 			to[indt[i]] += w[i] * from[indf[i]]
 		end
 		return
@@ -81,8 +81,8 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit,
     	blocks      = ceil.(Int, gridsize ./ threads)
 	@cuda threads=threads blocks=blocks kernel(indexing, ind_f, ind_t, weights, gridsize, divunit, coarse_size)
 
-	P = PR_op(ind_f, ind_t, weights)
-	R = PR_op(ind_t, ind_f, weights)
+	P = PR_op(ind_t, ind_f, weights)
+	R = PR_op(ind_f, ind_t, weights)
 
 	return P, R
 end
