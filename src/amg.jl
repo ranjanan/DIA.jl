@@ -1,4 +1,4 @@
-import AlgebraicMultigrid: gs!, Sweep, Smoother, GaussSeidel
+import AlgebraicMultigrid: gs!, Sweep, Smoother, GaussSeidel, Level, extend_heirarchy!
 
 
 struct RedBlackSweep <: Sweep
@@ -59,7 +59,7 @@ function mul!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
 	@cuda threads=64 blocks=ceil(Int, length(P.ind_from)/64) kernel(from, to, P.ind_from, P.ind_to, P.weights)
 end		
 
-function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit, indexing) where {T, TF, CuVector}
+function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit, indexing) where {T,TF}
 	coarse_size = ceil.(Int64, gridsize ./ divunit)
 	ind_f, ind_t, weights = cuzeros(Int64, prod(gridsize)), cuzeros(Int64, prod(gridsize)), cuzeros(T, prod(gridsize))
 	
@@ -92,9 +92,53 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit,
 	return P, R
 end
 
-#function 
+function gmg_PAP_diag(indexing, rev_indexing, offset_from, diag_from, diag_offdiag, diag_main, gridsize, divunit)
+	coarse_size = ceil.(Int64, gridsize ./ divunit)		
+	i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+	j = (blockIdx().y-1) * blockDim().y + threadIdx().y
+    k = (blockIdx().z-1) * blockDim().z + threadIdx().z
+	nd = indexing(gridsize..., i, j, k) ### row number
 
+	#  Coeff nd->nd_nb becomes nd_coarse->nd_nb_coarse, and in ijk (i,j,k)->ind_nb becomes ind_nd_coarse->ind_nb_coarse
+	if nd>max(-offset_from, 0) && nd<min(prod(gridsize), prod(gridsize)-offset_from)
+		nd_nb = nd + offset_from
+		ind_nb = rev_indexing(gridsize..., nd_nb) 
+		ind_nd_coarse = ceil.(Int, (i, j, k)./divunit)
+		ind_nb_coarse = ceil.(Int, ind_nb ./ divunit)
+		nd_coarse = indexing(coarse_size..., ind_nd_coarse)
+		nd_nb_coarse = indexing(coarse_size..., ind_nb_coarse)
+		value_diag = offset_from > 0 ? diag_from[nd] : diag_from[nd+offset_from]
+		if nd_coarse==nd_nb_coarse ## Me and neighbor in the same cell in coarse level
+			@atomic diag_main[nd_coarse] += value_diag
+		elseif nd_coarse>nd_nb_coarse ## subdiagonal
+			@atomic diag_offdiag[nd_nb_coarse] += value_diag
+		else 
+			@atomic diag_offdiag[nd_coarse] += value_diag
+		end
+	end
+end	
 
+function extend_heirarchy!(levels, A::SparseMatrixDIA{T, TF, CuVector}, gridsize, divunit, indexing, rev_indexing) where {T, TF}
+	P, R = gmg_interpolation(A, gridsize, divunit, indexing)
+	c_length  = prod(ceil.(gridsize ./ divunit))
+	c_offsets = [rev_indexing(gridsize..., A.diags[i].first) for i in 1:length(A.diags)]
+	A_c = SparseMatrixDIA([c_offsets[i]->cuzero(T, c_length - abs(c_offsets[i])) for i in 1:length(A.diags)])
+	d   = length(A.diags)>>1+1 # main diag index
+	
+	max_threads = 256
+    threads_x   = min(max_threads, gridsize[1])
+    threads_y   = min(max_threads ÷ threads_x, gridsize[2])
+    threads_z   = min(max_threads ÷ threads_x ÷ threads_y, gridsize[3])
+    threads     = (threads_x, threads_y, threads_z)
+    blocks      = ceil.(Int, gridsize ./ threads)
+
+	for i in 1:length(A.diags)
+		@cuda threads=threads blocks=blocks gmg_PAP_diag(indexing, rev_indexing, A.diags[i].first, A.diags[i].second, A_c.diags[i].second, A_c.diags[d].second, gridsize, divunit)
+	end
+	
+	push!(levels, Level(A, P, R))	
+	return A_c
+end
 
 
 ### Copy and Divide with CuArray index (red or black)
