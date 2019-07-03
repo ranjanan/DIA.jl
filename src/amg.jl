@@ -122,7 +122,7 @@ function extend_heirarchy!(levels, A::SparseMatrixDIA{T, TF, CuVector}, gridsize
 	P, R = gmg_interpolation(A, gridsize, divunit, indexing)
 	c_length  = prod(ceil.(gridsize ./ divunit))
 	c_offsets = [rev_indexing(gridsize..., A.diags[i].first) for i in 1:length(A.diags)]
-	A_c = SparseMatrixDIA([c_offsets[i]->cuzero(T, c_length - abs(c_offsets[i])) for i in 1:length(A.diags)])
+	A_c = SparseMatrixDIA([c_offsets[i]=>cuzeros(T, c_length - abs(c_offsets[i])) for i in 1:length(A.diags)])
 	d   = length(A.diags)>>1+1 # main diag index
 	
 	max_threads = 256
