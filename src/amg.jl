@@ -49,35 +49,44 @@ struct PR_op{T}
 	weights::AbstractVector{T} ## All three vectors should have same length(length of finer grid)
 end
 function mul!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
+	
 	function kernel(from, to, indf, indt, w)
-		i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+		i = (blockIdx().x-1) * blockDim().x + threadIdx().x		
 		if i<=length(indf)
 			@atomic to[indt[i]] += w[i] * from[indf[i]]
 		end
+
 		return
 	end
+
 	@cuda threads=64 blocks=ceil(Int, length(P.ind_from)/64) kernel(from, to, P.ind_from, P.ind_to, P.weights)
 end		
 
 function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit, indexing) where {T,TF}
-	coarse_size = ceil.(Int64, gridsize ./ divunit)
-	ind_f, ind_t, weights = cuzeros(Int64, prod(gridsize)), cuzeros(Int64, prod(gridsize)), cuzeros(T, prod(gridsize))
 	
-	function kernel(indexing, ind_f, ind_t, weights, gridsize, divunit, coarse_size)
+	cdim  = ceil.(Int64, fdim ./ agg)
+	ind_f = cuzeros(Int64, prod(fdim))
+	ind_t = cuzeros(Int64, prod(fdim))
+	w     = cuzeros(T, prod(fdim))
+	
+	function kernel(ind, ind_f, ind_t, w, fdim, agg, cdim)
 		i = (blockIdx().x-1) * blockDim().x + threadIdx().x
 		j = (blockIdx().y-1) * blockDim().y + threadIdx().y
 		k = (blockIdx().z-1) * blockDim().z + threadIdx().z
-		if i<=gridsize[1] && j<=gridsize[2] && k<=gridsize[3]
-			i2, j2, k2 = ceil.(Int, (i, j, k)./divunit)
-			nd = indexing(gridsize..., i, j, k)
-			nd_coarse = indexing(coarse_size..., i2, j2, k2)
+
+		if prod((i, j, k) .< (fdim))
+			i2 = ceil.(Int, (i, j, k)./agg)
+			nd = ind(fsize..., i, j, k)
+			nd_c = ind(csize..., i2...)
 			ind_f[nd] = nd
-			ind_t[nd] = nd_coarse
-			weights[nd] = 1.0 # https://calcul.math.cnrs.fr/attachments/spip/IMG/pdf/aggamgtut_notay.pdf page 56
+			ind_t[nd] = nd_c
+			w[nd] = 1.0 # https://calcul.math.cnrs.fr/attachments/spip/IMG/pdf/aggamgtut_notay.pdf page 56
 		end
+
 		return nothing
 	end
-
+	
+	# thread/block setup
 	max_threads = 256
 	threads_x   = min(max_threads, gridsize[1])
 	threads_y   = min(max_threads ÷ threads_x, gridsize[2])
@@ -86,45 +95,53 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit,
    	blocks      = ceil.(Int, gridsize ./ threads)
 	@cuda threads=threads blocks=blocks kernel(indexing, ind_f, ind_t, weights, gridsize, divunit, coarse_size)
 
-	P = PR_op(ind_t, ind_f, weights)
-	R = PR_op(ind_f, ind_t, weights)
+	P = PR_op(ind_t, ind_f, w)
+	R = PR_op(ind_f, ind_t, w)
 
 	return P, R
 end
 
-function gmg_PAP_diag(indexing, rev_indexing, offset_from, diag_from, diag_offdiag, diag_main, gridsize, divunit)
-	coarse_size = ceil.(Int64, gridsize ./ divunit)		
+function gmg_PAP_diag(ind, rev_ind, o_from, d_from, d_c_off, d_c_main, fdim, agg)
+	
+	cdim = ceil.(Int64, fdim ./ agg)		
 	i = (blockIdx().x-1) * blockDim().x + threadIdx().x
 	j = (blockIdx().y-1) * blockDim().y + threadIdx().y
     k = (blockIdx().z-1) * blockDim().z + threadIdx().z
-	nd = indexing(gridsize..., i, j, k) ### row number
+	nd = ind(fdim..., i, j, k) ### row number
 
 	#  Coeff nd->nd_nb becomes nd_coarse->nd_nb_coarse, and in ijk (i,j,k)->ind_nb becomes ind_nd_coarse->ind_nb_coarse
-	if nd>max(-offset_from, 0) && nd<min(prod(gridsize), prod(gridsize)-offset_from)
-		nd_nb = nd + offset_from
-		ind_nb = rev_indexing(gridsize..., nd_nb) 
-		ind_nd_coarse = ceil.(Int, (i, j, k)./divunit)
-		ind_nb_coarse = ceil.(Int, ind_nb ./ divunit)
-		nd_coarse = indexing(coarse_size..., ind_nd_coarse)
-		nd_nb_coarse = indexing(coarse_size..., ind_nb_coarse)
-		value_diag = offset_from > 0 ? diag_from[nd] : diag_from[nd+offset_from]
-		if nd_coarse==nd_nb_coarse ## Me and neighbor in the same cell in coarse level
-			@atomic diag_main[nd_coarse] += value_diag
-		elseif nd_coarse>nd_nb_coarse ## subdiagonal
-			@atomic diag_offdiag[nd_nb_coarse] += value_diag
+	if nd>max(-o_from, 0) && nd<min(prod(fdim), prod(fdim)-o_from)
+		nd_nb   = nd + o_from
+		i_nb    = rev_ind(fdim..., nd_nb) 
+		i_nd_c  = ceil.(Int, (i, j, k)./agg)
+		i_nb_c  = ceil.(Int, i_nb ./ agg)
+		nd_c    = ind(cdim..., i_nd_c)
+		nd_nb_c = ind(cdim..., i_nb_c)
+
+		val = o_from > 0 ? d_from[nd] : d_from[nd+o_from]
+		if nd_c==nd_nb_c ## Me and neighbor in the same cell in coarse level
+			@atomic d_c_main[nd_c] += val
+		elseif nd_c>nd_nb_c ## subdiagonal
+			@atomic d_c_off[nd_nb_c] += val
 		else 
-			@atomic diag_offdiag[nd_coarse] += value_diag
+			@atomic d_c_off[nd_c] += val
 		end
 	end
+
+	return nothing
 end	
 
-function extend_heirarchy!(levels, A::SparseMatrixDIA{T, TF, CuVector}, gridsize, divunit, indexing, rev_indexing) where {T, TF}
-	P, R = gmg_interpolation(A, gridsize, divunit, indexing)
-	c_length  = prod(ceil.(gridsize ./ divunit))
-	c_offsets = [rev_indexing(gridsize..., A.diags[i].first) for i in 1:length(A.diags)]
-	A_c = SparseMatrixDIA([c_offsets[i]=>cuzeros(T, c_length - abs(c_offsets[i])) for i in 1:length(A.diags)])
-	d   = length(A.diags)>>1+1 # main diag index
+function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector}, fdim, agg, ind, rev_ind) where {T, TF}
 	
+	P, R = gmg_interpolation(A, fdim, agg, ind)
+	
+	cdim = ceil.(fdim ./ agg)
+	c_l  = prod(cdim)
+	c_o  = [-cdim[2]*cdim[3], -cdim[3], -1, 0, 1, cdim[3], cdim[2]*cdim[3]] ## Can't figure out how to do this generic
+	A_c  = SparseMatrixDIA([c_o[i]=>cuzeros(T, c_l - abs(c_o[i])) for i in 1:length(c.o)])
+	d    = length(A.diags)>>1+1 # main diag index
+	
+	# threads/blocks setup
 	max_threads = 256
     threads_x   = min(max_threads, gridsize[1])
     threads_y   = min(max_threads ÷ threads_x, gridsize[2])
@@ -133,7 +150,8 @@ function extend_heirarchy!(levels, A::SparseMatrixDIA{T, TF, CuVector}, gridsize
     blocks      = ceil.(Int, gridsize ./ threads)
 
 	for i in 1:length(A.diags)
-		@cuda threads=threads blocks=blocks gmg_PAP_diag(indexing, rev_indexing, A.diags[i].first, A.diags[i].second, A_c.diags[i].second, A_c.diags[d].second, gridsize, divunit)
+		@cuda threads=threads blocks=blocks gmg_PAP_diag(ind, rev_ind, A.diags[i].first, A.diags[i].second, 
+															A_c.diags[i].second, A_c.diags[d].second, fdim, agg)
 	end
 	
 	push!(levels, Level(A, P, R))	
