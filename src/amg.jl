@@ -14,19 +14,26 @@ function (s::GaussSeidel{RedBlackSweep})(A::SparseMatrixDIA{T}, x::CuVector{T}, 
 end
 
 function _gs_diag!(offset, diag, x, i)
-	if   offset<0 x[i] -= diag[i+offset] * x[i+offset] ## i+offset should be >0
-    else x[i] -= diag[i] * x[i+offset] end             ## i+offset should be <=length(n)
+	if   offset<0 
+		x[i] -= diag[i+offset] * x[i+offset] ## i+offset should be >0
+    else 
+		x[i] -= diag[i] * x[i+offset] 
+	end   ## i+offset should be <=length(n)
 end
 
 function _gs_kernel!(offset, diag, x, ind)
 	i = (blockIdx().x-1) * blockDim().x + threadIdx().x
-    if i<=length(ind) && ind[i]+offset>0 && ind[i]+offset<=length(x) _gs_diag!(offset, diag, x, ind[i]) end
-    return
+    if i<=length(ind) && ind[i]+offset>0 && ind[i]+offset<=length(x) 
+		_gs_diag!(offset, diag, x, ind[i]) 
+	end
+
+    return nothing
 end
 
 function _gs!(A::SparseMatrixDIA, b, x, ind) ## Performs GS on subset ind ⊂ 1:length(x), ind must be CuArray
     n = length(ind)
     _copy_cuind!(b, x, ind)
+	
     for i in 1:length(A.diags)
     	if A.diags[i].first != 0
         	@cuda threads=64 blocks=ceil(Int, n/64) _gs_kernel!(A.diags[i].first, A.diags[i].second, x, ind)
@@ -62,7 +69,7 @@ function mul!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
 	@cuda threads=64 blocks=ceil(Int, length(P.ind_from)/64) kernel(from, to, P.ind_from, P.ind_to, P.weights)
 end		
 
-function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit, indexing) where {T,TF}
+function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg, ind) where {T,TF}
 	
 	cdim  = ceil.(Int64, fdim ./ agg)
 	ind_f = cuzeros(Int64, prod(fdim))
@@ -76,8 +83,8 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit,
 
 		if prod((i, j, k) .< (fdim))
 			i2 = ceil.(Int, (i, j, k)./agg)
-			nd = ind(fsize..., i, j, k)
-			nd_c = ind(csize..., i2...)
+			nd = ind(fdim..., i, j, k)
+			nd_c = ind(cdim..., i2...)
 			ind_f[nd] = nd
 			ind_t[nd] = nd_c
 			w[nd] = 1.0 # https://calcul.math.cnrs.fr/attachments/spip/IMG/pdf/aggamgtut_notay.pdf page 56
@@ -88,12 +95,12 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector}, gridsize, divunit,
 	
 	# thread/block setup
 	max_threads = 256
-	threads_x   = min(max_threads, gridsize[1])
-	threads_y   = min(max_threads ÷ threads_x, gridsize[2])
-   	threads_z   = min(max_threads ÷ threads_x ÷ threads_y, gridsize[3])
+	threads_x   = min(max_threads, fdim[1])
+	threads_y   = min(max_threads ÷ threads_x, fdim[2])
+   	threads_z   = min(max_threads ÷ threads_x ÷ threads_y, fdim[3])
    	threads     = (threads_x, threads_y, threads_z)
-   	blocks      = ceil.(Int, gridsize ./ threads)
-	@cuda threads=threads blocks=blocks kernel(indexing, ind_f, ind_t, weights, gridsize, divunit, coarse_size)
+   	blocks      = ceil.(Int, fdim ./ threads)
+	@cuda threads=threads blocks=blocks kernel(ind, ind_f, ind_t, w, fdim, agg, cdim)
 
 	P = PR_op(ind_t, ind_f, w)
 	R = PR_op(ind_f, ind_t, w)
@@ -131,23 +138,23 @@ function gmg_PAP_diag(ind, rev_ind, o_from, d_from, d_c_off, d_c_main, fdim, agg
 	return nothing
 end	
 
-function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector}, fdim, agg, ind, rev_ind) where {T, TF}
+function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg, ind, rev_ind) where {T, TF}
 	
 	P, R = gmg_interpolation(A, fdim, agg, ind)
 	
 	cdim = ceil.(fdim ./ agg)
 	c_l  = prod(cdim)
 	c_o  = [-cdim[2]*cdim[3], -cdim[3], -1, 0, 1, cdim[3], cdim[2]*cdim[3]] ## Can't figure out how to do this generic
-	A_c  = SparseMatrixDIA([c_o[i]=>cuzeros(T, c_l - abs(c_o[i])) for i in 1:length(c.o)])
+	A_c  = SparseMatrixDIA([c_o[i]=>cuzeros(T, round(Int, c_l - abs(c_o[i]))) for i in 1:length(c_o)], c_l, c_l)
 	d    = length(A.diags)>>1+1 # main diag index
 	
 	# threads/blocks setup
 	max_threads = 256
-    threads_x   = min(max_threads, gridsize[1])
-    threads_y   = min(max_threads ÷ threads_x, gridsize[2])
-    threads_z   = min(max_threads ÷ threads_x ÷ threads_y, gridsize[3])
+    threads_x   = min(max_threads, fdim[1])
+    threads_y   = min(max_threads ÷ threads_x, fdim[2])
+    threads_z   = min(max_threads ÷ threads_x ÷ threads_y, fdim[3])
     threads     = (threads_x, threads_y, threads_z)
-    blocks      = ceil.(Int, gridsize ./ threads)
+    blocks      = ceil.(Int, fdim ./ threads)
 
 	for i in 1:length(A.diags)
 		@cuda threads=threads blocks=blocks gmg_PAP_diag(ind, rev_ind, A.diags[i].first, A.diags[i].second, 
