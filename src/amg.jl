@@ -71,9 +71,9 @@ end
 
 function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg, ind) where {T,TF}
 	
-	cdim  = ceil.(Int64, fdim ./ agg)
-	ind_f = cuzeros(Int64, prod(fdim))
-	ind_t = cuzeros(Int64, prod(fdim))
+	cdim  = ceil.(Int, fdim ./ agg)
+	ind_f = cuzeros(Int, prod(fdim))
+	ind_t = cuzeros(Int, prod(fdim))
 	w     = cuzeros(T, prod(fdim))
 	
 	function kernel(ind, ind_f, ind_t, w, fdim, agg, cdim)
@@ -94,12 +94,7 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg, ind)
 	end
 	
 	# thread/block setup
-	max_threads = 256
-	threads_x   = min(max_threads, fdim[1])
-	threads_y   = min(max_threads ÷ threads_x, fdim[2])
-   	threads_z   = min(max_threads ÷ threads_x ÷ threads_y, fdim[3])
-   	threads     = (threads_x, threads_y, threads_z)
-   	blocks      = ceil.(Int, fdim ./ threads)
+	threads, blocks = cudasetup(fdim, 256)	
 	@cuda threads=threads blocks=blocks kernel(ind, ind_f, ind_t, w, fdim, agg, cdim)
 
 	P = PR_op(ind_t, ind_f, w)
@@ -110,23 +105,22 @@ end
 
 function gmg_PAP_diag(ind, rev_ind, o_from, d_from, d_c_off, d_c_main, fdim, agg)
 	
-	cdim = ceil.(Int64, fdim ./ agg)		
+	cdim = ceil.(Int, fdim ./ agg)		
 	i = (blockIdx().x-1) * blockDim().x + threadIdx().x
-	j = (blockIdx().y-1) * blockDim().y + threadIdx().y
-    k = (blockIdx().z-1) * blockDim().z + threadIdx().z
-	nd = ind(fdim..., i, j, k) ### row number
+	nd = o_from > 0 ? i : i - o_from # Row number
 
 	#  Coeff nd->nd_nb becomes nd_coarse->nd_nb_coarse, and in ijk (i,j,k)->ind_nb becomes ind_nd_coarse->ind_nb_coarse
-	if nd>max(-o_from, 0) && nd<min(prod(fdim), prod(fdim)-o_from)
+	if i<=length(d_from)
 		nd_nb   = nd + o_from
+		i_nd    = rev_ind(fdim..., nd)
 		i_nb    = rev_ind(fdim..., nd_nb) 
-		i_nd_c  = ceil.(Int, (i, j, k)./agg)
+		i_nd_c  = ceil.(Int, i_nd ./ agg)
 		i_nb_c  = ceil.(Int, i_nb ./ agg)
 		nd_c    = ind(cdim..., i_nd_c...)
 		nd_nb_c = ind(cdim..., i_nb_c...)
 
 		val = o_from > 0 ? d_from[nd] : d_from[nd+o_from]
-		if nd_c==nd_nb_c ## Me and neighbor in the same cell in coarse level
+		if nd_c==nd_nb_c ## Me and neighbor in the same agg in coarse level
 			@atomic d_c_main[nd_c] += val
 		elseif nd_c>nd_nb_c ## subdiagonal
 			@atomic d_c_off[nd_nb_c] += val
@@ -142,23 +136,21 @@ function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, a
 	
 	P, R = gmg_interpolation(A, fdim, agg, ind)
 	
-	cdim = ceil.(fdim ./ agg)
+	cdim = ceil.(Int, fdim ./ agg)
 	c_l  = prod(cdim)
 	c_o  = [-cdim[2]*cdim[3], -cdim[3], -1, 0, 1, cdim[3], cdim[2]*cdim[3]] ## Can't figure out how to do this generic
 	A_c  = SparseMatrixDIA([c_o[i]=>cuzeros(T, round(Int, c_l - abs(c_o[i]))) for i in 1:length(c_o)], c_l, c_l)
 	d    = length(A.diags)>>1+1 # main diag index
 	
 	# threads/blocks setup
-	max_threads = 256
-    threads_x   = min(max_threads, fdim[1])
-    threads_y   = min(max_threads ÷ threads_x, fdim[2])
-    threads_z   = min(max_threads ÷ threads_x ÷ threads_y, fdim[3])
-    threads     = (threads_x, threads_y, threads_z)
-    blocks      = ceil.(Int, fdim ./ threads)
+		
 
 	for i in 1:length(A.diags)
-		@cuda threads=threads blocks=blocks gmg_PAP_diag(ind, rev_ind, A.diags[i].first, A.diags[i].second, 
-															A_c.diags[i].second, A_c.diags[d].second, fdim, agg)
+		@cuda threads=256 blocks=ceil(Int, length(A.diags[i].second)/256)  gmg_PAP_diag(ind, rev_ind, 
+																						A.diags[i].first,
+																						A.diags[i].second, 
+																						A_c.diags[i].second, 
+																						A_c.diags[d].second, fdim, agg)
 	end
 	
 	push!(levels, Level(A, P, R))	
@@ -182,4 +174,14 @@ function _div_cuind!(x, y, ind) ## x /= y for ind
         	return
     end
     @cuda threads=64 blocks=ceil(Int, length(ind)/64) kernel(x, y, ind)
+end
+function cudasetup(dim, numthreads)
+	max_threads = numthreads
+    threads_x   = min(max_threads, dim[1])
+    threads_y   = min(max_threads ÷ threads_x, dim[2])
+    threads_z   = min(max_threads ÷ threads_x ÷ threads_y, dim[3])
+    threads     = (threads_x, threads_y, threads_z)
+    blocks      = ceil.(Int, dim ./ threads)
+	
+	return threads, blocks
 end
