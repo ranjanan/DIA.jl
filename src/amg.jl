@@ -6,6 +6,7 @@ struct RedBlackSweep <: Sweep
 	ind2::CuVector{Int64}
 end
 GaussSeidel(rb::RedBlackSweep) = GaussSeidel(rb, 1)
+
 function (s::GaussSeidel{RedBlackSweep})(A::SparseMatrixDIA{T}, x::CuVector{T}, b::CuVector{T}) where {T}
 	# @assert eltype(A.diags)==Pair{Int64, CuVector{T}} || ArgumentError("only CuDIA allowed") 
 	for i in 1:s.iter
@@ -157,7 +158,6 @@ function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, a
 	return A_c
 end
 
-function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}; presmoother=
 
 
 ### Copy and Divide with CuArray index (red or black)
