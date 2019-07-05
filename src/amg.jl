@@ -157,6 +157,8 @@ function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, a
 	return A_c
 end
 
+function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}; presmoother=
+
 
 ### Copy and Divide with CuArray index (red or black)
 function _copy_cuind!(from, to, ind)
