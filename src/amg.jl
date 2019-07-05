@@ -122,8 +122,8 @@ function gmg_PAP_diag(ind, rev_ind, o_from, d_from, d_c_off, d_c_main, fdim, agg
 		i_nb    = rev_ind(fdim..., nd_nb) 
 		i_nd_c  = ceil.(Int, (i, j, k)./agg)
 		i_nb_c  = ceil.(Int, i_nb ./ agg)
-		nd_c    = ind(cdim..., i_nd_c)
-		nd_nb_c = ind(cdim..., i_nb_c)
+		nd_c    = ind(cdim..., i_nd_c...)
+		nd_nb_c = ind(cdim..., i_nb_c...)
 
 		val = o_from > 0 ? d_from[nd] : d_from[nd+o_from]
 		if nd_c==nd_nb_c ## Me and neighbor in the same cell in coarse level
