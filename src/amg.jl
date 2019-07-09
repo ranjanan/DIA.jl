@@ -50,6 +50,34 @@ end
 
 
 
+
+
+"""
+    PR_op   
+type that could be used for both Prolongation and Restriction operator.
+mul!(x::Vector, ::PR_op, y::Vector) should be same as 
+multiplying Prolongagion/Restriction matrix on a vector
+
+    fdim 
+Dimension of the fine grid. Since Geometric information determines 
+node indenxing convention we need to input fdim for function gpugmg
+
+    agg
+Size of aggregate. Dimension of subset that becomes new nodes
+ex) fdim = (100, 25, 20), agg = (2, 2, 1) give first coarse dimension(cdim) = (50, 13, 20)
+
+    ind
+Indexing function with dimension (indexing could vary by implementation
+ex) ind(fdim..., 1, 1, 1) = 1
+ex) ind(fdim..., 20, 20, 20) = 10000
+    
+    rev_ind
+inputs linear indexing and outputs tuple of multidimension indexing
+ex) rev_ind(fdim..., 10000) = (20, 20, 20)
+"""
+
+
+
 ###### Multilevel construction
 struct PR_op{T}
 	ind_from::AbstractVector{Int64} 
