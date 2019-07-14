@@ -109,7 +109,7 @@ function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,V},
 ret
 end
 
-function BLAS.gemv!(tA::Char, alpha::Number, S::SparseMatrixDIA{Tv1,Ti,V}, b::Vector{Tv2}, beta::Number, ret::Vector{Tv2}) where {Tv1,Tv2,Ti,V}
+function BLAS.gemv!(tA::Char, alpha::Float64, S::SparseMatrixDIA{Tv1,Ti,V}, b::Vector{Tv2}, beta::Float64, ret::Vector{Tv2}) where {Tv1,Tv2,Ti,V}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
     rmul!(ret, beta)
