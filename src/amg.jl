@@ -98,25 +98,24 @@ function mul!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
 	@cuda threads=64 blocks=ceil(Int, length(P.ind_from)/64) kernel(from, to, P.ind_from, P.ind_to, P.weights)
 end		
 
-function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg, ind) where {T,TF}
+function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg) where {T,TF}
 	
-	cdim  = ceil.(Int, fdim ./ agg)
-	ind_f = cuzeros(Int, prod(fdim))
-	ind_t = cuzeros(Int, prod(fdim))
-	w     = cuzeros(T, prod(fdim))
+    fl    = prod(fdim)
+	ind_f = cuzeros(Int, fl)
+	ind_t = cuzeros(Int, fl)
+	w     = cuzeros(T, fl)
 	
-	function kernel(ind, ind_f, ind_t, w, fdim, agg, cdim)
+	function kernel(ind_f, ind_t, w, fdim, agg)
 		i = (blockIdx().x-1) * blockDim().x + threadIdx().x
-		j = (blockIdx().y-1) * blockDim().y + threadIdx().y
-		k = (blockIdx().z-1) * blockDim().z + threadIdx().z
-
-		if prod((i, j, k) .< (fdim))
-			i2 = ceil.(Int, (i, j, k)./agg)
-			nd = ind(fdim..., i, j, k)
-			nd_c = ind(cdim..., i2...)
-			ind_f[nd] = nd
-			ind_t[nd] = nd_c
-			w[nd] = 1.0 # https://calcul.math.cnrs.fr/attachments/spip/IMG/pdf/aggamgtut_notay.pdf page 56
+		
+        if i <= prod(fdim)	
+            cdim = ceil.(Int, fdim ./ agg)
+            cart_f = CartesianIndices(fdim)[i]
+            cart_c = CartesianIndex(ceil.(Int, Tuple(cart_f)./agg))
+			line_c = LinearIndex(cdim)[cart_c]
+			ind_f[i] = i # line_f = i
+			ind_t[i] = line_c
+			w[i] = 1.0 # https://calcul.math.cnrs.fr/attachments/spip/IMG/pdf/aggamgtut_notay.pdf page 56
 		end
 
 		return nothing
@@ -124,7 +123,7 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg, ind)
 	
 	# thread/block setup
 	threads, blocks = cudasetup(fdim, 256)	
-	@cuda threads=threads blocks=blocks kernel(ind, ind_f, ind_t, w, fdim, agg, cdim)
+	@cuda threads=threads blocks=blocks kernel(ind_f, ind_t, w, fdim, agg)
 
 	P = PR_op(ind_t, ind_f, w)
 	R = PR_op(ind_f, ind_t, w)
@@ -132,7 +131,7 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg, ind)
 	return P, R
 end
 
-function gmg_PAP_diag(ind, rev_ind, o_from, d_from, d_c_off, d_c_main, fdim, agg)
+function gmg_PAP_diag(o_from, d_from, d_c_off, d_c_main, fdim, agg)
 	
 	cdim = ceil.(Int, fdim ./ agg)		
 	i = (blockIdx().x-1) * blockDim().x + threadIdx().x
@@ -141,12 +140,12 @@ function gmg_PAP_diag(ind, rev_ind, o_from, d_from, d_c_off, d_c_main, fdim, agg
 	#  Coeff nd->nd_nb becomes nd_coarse->nd_nb_coarse, and in ijk (i,j,k)->ind_nb becomes ind_nd_coarse->ind_nb_coarse
 	if i<=length(d_from)
 		nd_nb   = nd + o_from
-		i_nd    = rev_ind(fdim..., nd)
-		i_nb    = rev_ind(fdim..., nd_nb) 
-		i_nd_c  = ceil.(Int, i_nd ./ agg)
-		i_nb_c  = ceil.(Int, i_nb ./ agg)
-		nd_c    = ind(cdim..., i_nd_c...)
-		nd_nb_c = ind(cdim..., i_nb_c...)
+		i_nd    = CartesianIndices(fdim)[nd]
+		i_nb    = CartesianIndices(fdim)[nd_nb] 
+		i_nd_c  = CartesianIndex(ceil.(Int, Tuple(i_nd) ./ agg))
+		i_nb_c  = CartesianIndex(ceil.(Int, Tuple(i_nb) ./ agg))
+		nd_c    = LinearIndices(cdim)[i_nd_c]
+		nd_nb_c = LinearIndices(cdim)[i_nb_c]        
 
 		val = o_from > 0 ? d_from[nd] : d_from[nd+o_from]
 		if nd_c==nd_nb_c ## Me and neighbor in the same agg in coarse level
@@ -161,13 +160,13 @@ function gmg_PAP_diag(ind, rev_ind, o_from, d_from, d_c_off, d_c_main, fdim, agg
 	return nothing
 end	
 
-function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg, ind, rev_ind) where {T, TF}
+function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg) where {T, TF}
 	
-	P, R = gmg_interpolation(A, fdim, agg, ind)
+	P, R = gmg_interpolation(A, fdim, agg)
 	
 	cdim = ceil.(Int, fdim ./ agg)
 	c_l  = prod(cdim)
-	c_o  = [-cdim[2]*cdim[3], -cdim[3], -1, 0, 1, cdim[3], cdim[2]*cdim[3]] ## Can't figure out how to do this generic
+	c_o  = [-cdim[2]*cdim[1], -cdim[1], -1, 0, 1, cdim[1], cdim[1]*cdim[2]] ## Can't figure out how to do this generic
 	A_c  = SparseMatrixDIA([c_o[i]=>cuzeros(T, round(Int, c_l - abs(c_o[i]))) for i in 1:length(c_o)], c_l, c_l)
 	d    = length(A.diags)>>1+1 # main diag index
 	
@@ -175,8 +174,7 @@ function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, a
 		
 
 	for i in 1:length(A.diags)
-		@cuda threads=256 blocks=ceil(Int, length(A.diags[i].second)/256)  gmg_PAP_diag(ind, rev_ind, 
-																						A.diags[i].first,
+		@cuda threads=256 blocks=ceil(Int, length(A.diags[i].second)/256)  gmg_PAP_diag(A.diags[i].first,
 																						A.diags[i].second, 
 																						A_c.diags[i].second, 
 																						A_c.diags[d].second, fdim, agg)
@@ -188,7 +186,7 @@ end
 
 
 
-### Copy and Divide with CuArray index (red or black)
+### Copy and Divide within specific CuArray index (CuArray of Ints, red or black)
 function _copy_cuind!(from, to, ind)
 	function kernel(from, to, ind)
     	i = (blockIdx().x-1) * blockDim().x + threadIdx().x
