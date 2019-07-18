@@ -112,7 +112,7 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg) wher
             cdim = ceil.(Int, fdim ./ agg)
             cart_f = CartesianIndices(fdim)[i]
             cart_c = CartesianIndex(ceil.(Int, Tuple(cart_f)./agg))
-			line_c = LinearIndex(cdim)[cart_c]
+			line_c = LinearIndices(cdim)[cart_c]
 			ind_f[i] = i # line_f = i
 			ind_t[i] = line_c
 			w[i] = 1.0 # https://calcul.math.cnrs.fr/attachments/spip/IMG/pdf/aggamgtut_notay.pdf page 56
