@@ -203,8 +203,21 @@ Dimension is ordered so that LinearIndices agrees with linear indexing of the gr
 ex) fdim=(5, 7, 9) then linear index of (3, 1, 1) = 3, (3, 2, 1) = 10 
 
 """
-function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg, ) where {T,TF}
+function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg; 
+                max_levels = 10,
+                max_coarse = 100,
+                coarse_solver = Pinv) where {T,TF,}
     levels = Vector{Level{SparseMatrixDIA{T,TF,CuVector{T}}, PR_op, PR_op}}()
+    
+    presmoother  = GaussSeidel(RedBlackSweep())
+    postsmoother = GaussSeidel(RedBlackSweep())
+
+    while length(levels) + 1 < max_levels && size(A, 1) > max_coarse
+        A = extend_heirarchy!(levels, A, fdim, agg)
+        fdim = ceil.(cdim./agg)
+    end
+    
+    return MultiLevel(levels, A, coarse_solver(A), presmoother, postsmoother, nothing)
 end    
 
 
