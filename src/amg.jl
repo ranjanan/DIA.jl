@@ -134,8 +134,7 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg) wher
 	end
 	
 	# thread/block setup
-	threads, blocks = cudasetup(fdim, 256)	
-	@cuda threads=threads blocks=blocks kernel(ind_f, ind_t, w, fdim, agg)
+	@cuda threads=256 blocks=ceil(Int, fl/256) kernel(ind_f, ind_t, w, fdim, agg)
 
 	P = PR_op(ind_t, ind_f, w)
 	R = PR_op(ind_f, ind_t, w)
@@ -211,7 +210,8 @@ function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg;
     
     presmoother  = GaussSeidel(RedBlackSweep())
     postsmoother = GaussSeidel(RedBlackSweep())
-
+    
+    @show max_coarse, size(A,1), max_levels, length(levels)
     while length(levels) + 1 < max_levels && size(A, 1) > max_coarse
         A = extend_heirarchy!(levels, A, fdim, agg)
         fdim = ceil.(cdim./agg)
