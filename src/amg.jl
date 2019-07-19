@@ -2,16 +2,37 @@ import AlgebraicMultigrid: gs!, Sweep, Smoother, GaussSeidel, Level, extend_heir
 
 
 struct RedBlackSweep <: Sweep
-	ind1::CuVector{Int64}
-	ind2::CuVector{Int64}
 end
 GaussSeidel(rb::RedBlackSweep) = GaussSeidel(rb, 1)
 
-function (s::GaussSeidel{RedBlackSweep})(A::SparseMatrixDIA{T}, x::CuVector{T}, b::CuVector{T}) where {T}
+function (s::GaussSeidel{RedBlackSweep})(A::SparseMatrixDIA{T}, x::CuVector{T}, b::CuVector{T}, ind_red, ind_black) where {T}
 	# @assert eltype(A.diags)==Pair{Int64, CuVector{T}} || ArgumentError("only CuDIA allowed") 
 	for i in 1:s.iter
-		gs!(A, b, x, s.sweep.ind1, s.sweep.ind2)
+		gs!(A, b, x, ind_r, ind_b)
 	end
+end
+
+function create_rb(fdim)
+    fl = prod(fdim)
+    ind_r = cuzeros(Int64, ceil(Int, fl/2))
+    ind_b = cuzeros(Int64, floor(Int, fl/2))
+    
+    function kernel(ir, ib, fdim)
+        i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+        if i<=prod(fdim)
+            c = sum(Tuple(CartesianIndices(fdim)[i]))%2
+            if c==1 #red
+                ir[ceil(Int, i/2)] = i
+            else
+                ib[ceil(Int, i/2)] = i
+            end
+        end
+        return nothing
+    end
+
+    @cuda threads=256 blocks=ceil(Int, fl/256) kernel(ind_r, ind_b, fdim)
+    
+    return ind_r, ind_b
 end
 
 function _gs_diag!(offset, diag, x, i)
@@ -31,7 +52,7 @@ function _gs_kernel!(offset, diag, x, ind)
     return nothing
 end
 
-function _gs!(A::SparseMatrixDIA, b, x, ind) ## Performs GS on subset ind ⊂ 1:length(x), ind must be CuArray
+function _gs!(A::SparseMatrixDIA, b, x, ind) ## Performs GS on subset ind ⊂ 1:length(x), ind must be CuArray of Int
     n = length(ind)
     _copy_cuind!(b, x, ind)
 	
@@ -65,15 +86,6 @@ node indenxing convention we need to input fdim for function gpugmg
     agg
 Size of aggregate. Dimension of subset that becomes new nodes
 ex) fdim = (100, 25, 20), agg = (2, 2, 1) give first coarse dimension(cdim) = (50, 13, 20)
-
-    ind
-Indexing function with dimension (indexing could vary by implementation
-ex) ind(fdim..., 1, 1, 1) = 1
-ex) ind(fdim..., 20, 20, 20) = 10000
-    
-    rev_ind
-inputs linear indexing and outputs tuple of multidimension indexing
-ex) rev_ind(fdim..., 10000) = (20, 20, 20)
 """
 
 
@@ -183,6 +195,17 @@ function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, a
 	push!(levels, Level(A, P, R))	
 	return A_c
 end
+
+"""
+    gmg
+Creates MultiLevel object from SparseMatrixDIA{T,TF,CuVector{T}} and fdim::NTuple{Int,N}, agg::NTuple{Int,N}
+Dimension is ordered so that LinearIndices agrees with linear indexing of the grid 
+ex) fdim=(5, 7, 9) then linear index of (3, 1, 1) = 3, (3, 2, 1) = 10 
+
+"""
+function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg, ) where {T,TF}
+    levels = Vector{Level{SparseMatrixDIA{T,TF,CuVector{T}}, PR_op, PR_op}}()
+end    
 
 
 
