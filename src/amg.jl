@@ -205,7 +205,7 @@ ex) fdim=(5, 7, 9) then linear index of (3, 1, 1) = 3, (3, 2, 1) = 10
 function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg; 
                 max_levels = 10,
                 max_coarse = 100,
-                coarse_solver = Pinv) where {T,TF,}
+                coarse_solver = Pinv) where {T,TF}
     levels = Vector{Level{SparseMatrixDIA{T,TF,CuVector{T}}, PR_op, PR_op}}()
     
     presmoother  = GaussSeidel(RedBlackSweep())
