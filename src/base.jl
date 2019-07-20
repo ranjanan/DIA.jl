@@ -23,7 +23,6 @@ function SparseArrays.nnz(a::SparseMatrixDIA)
     l
 end
 
-
 function Base.getindex(a::SparseMatrixDIA{Tv,Ti,N}, i, j) where {Tv,Ti,N}
     diff = j - i
     ind = ifelse(diff > 0, i, j)

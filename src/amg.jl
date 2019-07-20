@@ -20,9 +20,9 @@ function create_rb(fdim)
     
     function kernel(ir, ib, fdim)
         i = (blockIdx().x-1) * blockDim().x + threadIdx().x
-        if i<=prod(fdim)
-            c = sum(Tuple(CartesianIndices(fdim)[i]))%2
-            if c==1 #red
+        if i <= prod(fdim)
+            c = sum(Tuple(CartesianIndices(fdim)[i])) % 2
+            if c == 1 #red
                 ir[ceil(Int, i/2)] = i
             else
                 ib[ceil(Int, i/2)] = i
@@ -37,7 +37,7 @@ function create_rb(fdim)
 end
 
 function _gs_diag!(offset, diag, x, i)
-	if   offset<0 
+	if   offset < 0 
 		x[i] -= diag[i+offset] * x[i+offset] ## i+offset should be >0
     else 
 		x[i] -= diag[i] * x[i+offset] 
@@ -223,7 +223,7 @@ function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg;
     presmoother  = GaussSeidel(RedBlackSweep())
     postsmoother = GaussSeidel(RedBlackSweep())
 
-	w = MultiLevelWorkspace(Val{1}, eltype(A))
+	w = MultiLevelWorkspace(A)
 	residual!(w, size(A, 1))
     
     while length(levels) + 1 < max_levels && size(A, 1) > max_coarse && prod(fdim .> 1)
@@ -237,6 +237,16 @@ function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg;
     
     return MultiLevel(levels, A, coarse_solver(A), presmoother, postsmoother, w)
 end
+MultiLevelWorkspace(A::SparseMatrixDIA{Tv,Ti,V}) where {Tv,Ti,V} = 
+	MultiLevelWorkspace{V,Val{1}}(Vector{V}(), Vector{V}(), Vector{V}())
+
+residual!(w::MultiLevelWorkspace{TX,bs}, n) where {TX <: CuArray, bs} = 
+	push!(w.res_vecs, CuArrays.zeros(n))
+coarse_b!(w::MultiLevelWorkspace{TX,bs}, n) where {TX <: CuArray, bs} = 
+	push!(w.coarse_bs, CuArrays.zeros(n))
+coarse_x!(w::MultiLevelWorkspace{TX,bs}, n) where {TX <: CuArray, bs} = 
+	push!(w.coarse_xs, CuArrays.zeros(n))
+
     
 """
 solve! outline
