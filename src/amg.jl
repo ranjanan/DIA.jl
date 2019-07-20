@@ -211,9 +211,7 @@ function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg;
     presmoother  = GaussSeidel(RedBlackSweep())
     postsmoother = GaussSeidel(RedBlackSweep())
     
-    @show max_coarse, size(A,1), max_levels, length(levels)
     while length(levels) + 1 < max_levels && size(A, 1) > max_coarse && prod(fdim .> 1)
-        @show fdim
         A = extend_heirarchy!(levels, A, fdim, agg)
         fdim = ceil.(Int, fdim./agg)
     end
