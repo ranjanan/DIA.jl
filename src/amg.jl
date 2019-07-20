@@ -1,4 +1,4 @@
-import AlgebraicMultigrid: gs!, Sweep, Smoother, GaussSeidel, Level, extend_heirarchy!, Pinv, MultiLevel
+import AlgebraicMultigrid: gs!, Sweep, Smoother, GaussSeidel, Level, extend_heirarchy!, Pinv, MultiLevel, Cycle
 
 
 struct RedBlackSweep <: Sweep
@@ -219,8 +219,26 @@ function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg;
     end
     
     return MultiLevel(levels, A, coarse_solver(A), presmoother, postsmoother, nothing)
-end    
-
+end
+    
+"""
+solve! outline
+"""
+function solve!(x, ml::MultiLevel, b::CuVector{T}, fdim
+                                    cycle::Cycle = V();
+                                    maxiter::Int = 100,
+                                    tol::Float64 = 1e-5,
+                                    verbose::Bool = false,
+                                    log::Bool = false,
+                                    calculate_residual = true) where {T}
+    #within loop
+    
+    ml.presmoother(A, x, b, create_rb(fdim)...) # Maybe we can create GMGMultiLevel and store dimension information of each steps?
+    ###
+    return
+end
+    
+    
 
 
 ### Copy and Divide within specific CuArray index (CuArray of Ints, red or black)
