@@ -1,4 +1,4 @@
-import AlgebraicMultigrid: gs!, Sweep, Smoother, GaussSeidel, Level, extend_heirarchy!
+import AlgebraicMultigrid: gs!, Sweep, Smoother, GaussSeidel, Level, extend_heirarchy!, Pinv
 
 
 struct RedBlackSweep <: Sweep
