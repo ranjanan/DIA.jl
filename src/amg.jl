@@ -96,6 +96,16 @@ struct PR_op{T}
 	ind_to::AbstractVector{Int64}
 	weights::AbstractVector{T} ## All three vectors should have same length(length of finer grid)
 end
+function _gs!(A::SparseMatrixDIA, b, x, ind) ## Performs GS on subset ind ⊂ 1:length(x), ind must be CuArray
+    n = length(ind)
+    _copy_cuind!(b, x, ind)
+    for i in 1:length(A.diags)
+            if A.diags[i].first != 0
+                    @cuda threads=64 blocks=ceil(Int, n/64) _gs_kernel!(A.diags[i].first, A.diags[i].second, x, ind)
+            end
+    end
+    _div_cuind!(x, A.diags[length(A.diags)>>1 + 1].second, ind) ### temp because length(A.diags)>>1+1 is the main diagonal
+end
 function mul!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
 	
 	function kernel(from, to, indf, indt, w)
@@ -235,14 +245,11 @@ function solve!(x, ml::MultiLevel, b::CuVector{T}, fdim
     ###
     return
 end
-    
-    
-
 
 ### Copy and Divide within specific CuArray index (CuArray of Ints, red or black)
 function _copy_cuind!(from, to, ind)
-	function kernel(from, to, ind)
-    	i = (blockIdx().x-1) * blockDim().x + threadIdx().x
+    function kernel(from, to, ind)
+        i = (blockIdx().x-1) * blockDim().x + threadIdx().x
         if i<=length(ind) to[ind[i]] = from[ind[i]] end
         return
     end
