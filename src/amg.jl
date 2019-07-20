@@ -215,7 +215,7 @@ function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg;
     while length(levels) + 1 < max_levels && size(A, 1) > max_coarse
         @show fdim
         A = extend_heirarchy!(levels, A, fdim, agg)
-        fdim = ceil.(fdim./agg)
+        fdim = ceil.(Int, fdim./agg)
     end
     
     return MultiLevel(levels, A, coarse_solver(A), presmoother, postsmoother, nothing)
