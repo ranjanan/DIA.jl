@@ -206,7 +206,7 @@ function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg;
                 max_levels = 10,
                 max_coarse = 100,
                 coarse_solver = Pinv) where {T,TF}
-    levels = Vector{Level{SparseMatrixDIA{T,TF,CuVector{T}}, PR_op, PR_op}}()
+    levels = Vector{Level{SparseMatrixDIA{T,TF,CuVector{T}}, PR_op{T}, PR_op{T}}}()
     
     presmoother  = GaussSeidel(RedBlackSweep())
     postsmoother = GaussSeidel(RedBlackSweep())
