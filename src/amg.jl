@@ -1,4 +1,5 @@
 import AlgebraicMultigrid: gs!, Sweep, Smoother, GaussSeidel, Level, extend_heirarchy!, Pinv, MultiLevel, Cycle
+import AlgebraicMultigrid: MultiLevelWorkspace, residual!, coarse_x!, coarse_b! 
 
 
 struct RedBlackSweep <: Sweep
@@ -14,8 +15,8 @@ end
 
 function create_rb(fdim)
     fl = prod(fdim)
-    ind_r = cuzeros(Int64, ceil(Int, fl/2))
-    ind_b = cuzeros(Int64, floor(Int, fl/2))
+    ind_r = CuArrays.zeros(Int64, ceil(Int, fl/2))
+    ind_b = CuArrays.zeros(Int64, floor(Int, fl/2))
     
     function kernel(ir, ib, fdim)
         i = (blockIdx().x-1) * blockDim().x + threadIdx().x
@@ -123,9 +124,9 @@ end
 function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg) where {T,TF}
 	
     fl    = prod(fdim)
-	ind_f = cuzeros(Int, fl)
-	ind_t = cuzeros(Int, fl)
-	w     = cuzeros(T, fl)
+	ind_f = CuArrays.zeros(Int, fl)
+	ind_t = CuArrays.zeros(Int, fl)
+	w     = CuArrays.zeros(T, fl)
 	
 	function kernel(ind_f, ind_t, w, fdim, agg)
 		i = (blockIdx().x-1) * blockDim().x + threadIdx().x
@@ -188,7 +189,7 @@ function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, a
 	cdim = ceil.(Int, fdim ./ agg)
 	c_l  = prod(cdim)
 	c_o  = [-cdim[2]*cdim[1], -cdim[1], -1, 0, 1, cdim[1], cdim[1]*cdim[2]] ## Can't figure out how to do this generic
-	A_c  = SparseMatrixDIA([c_o[i]=>cuzeros(T, round(Int, c_l - abs(c_o[i]))) for i in 1:length(c_o)], c_l, c_l)
+	A_c  = SparseMatrixDIA([c_o[i]=>CuArrays.zeros(T, round(Int, c_l - abs(c_o[i]))) for i in 1:length(c_o)], c_l, c_l)
 	d    = length(A.diags)>>1+1 # main diag index
 	
 	# threads/blocks setup
@@ -216,23 +217,31 @@ function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg;
                 max_levels = 10,
                 max_coarse = 100,
                 coarse_solver = Pinv) where {T,TF}
+
     levels = Vector{Level{SparseMatrixDIA{T,TF,CuVector{T}}, PR_op{T}, PR_op{T}}}()
     
     presmoother  = GaussSeidel(RedBlackSweep())
     postsmoother = GaussSeidel(RedBlackSweep())
+
+	w = MultiLevelWorkspace(Val{1}, eltype(A))
+	residual!(w, size(A, 1))
     
     while length(levels) + 1 < max_levels && size(A, 1) > max_coarse && prod(fdim .> 1)
         A = extend_heirarchy!(levels, A, fdim, agg)
         fdim = ceil.(Int, fdim./agg)
+
+		coarse_x!(w, size(A, 1))
+        coarse_b!(w, size(A, 1))
+
     end
     
-    return MultiLevel(levels, A, coarse_solver(A), presmoother, postsmoother, nothing)
+    return MultiLevel(levels, A, coarse_solver(A), presmoother, postsmoother, w)
 end
     
 """
 solve! outline
 """
-function solve!(x, ml::MultiLevel, b::CuVector{T}, fdim
+function solve!(x, ml::MultiLevel, b::CuVector{T}, fdim,
                                     cycle::Cycle = V();
                                     maxiter::Int = 100,
                                     tol::Float64 = 1e-5,

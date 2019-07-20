@@ -17,8 +17,8 @@ Base.size(a::SparseMatrixDIA) = (a.m, a.n)
 function SparseArrays.nnz(a::SparseMatrixDIA)
     l = 0
     for x in a.diags
-        per = length(x.second[1])
-        l += length(x.second) * per
+        per = length(x.second)
+        l += per
     end
     l
 end
