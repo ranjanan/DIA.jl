@@ -21,11 +21,11 @@ function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,V},
     ret
 end
 # GPU mul!
-function LinearAlgebra.mul!(ret::CuVector, S::SparseMatrixDIA{Tv1,Ti,V},
-                            b::CuVector{Tv2}) where {Tv1,Tv2,Ti,N,V}
+function buzz!(ret::CuVector, S::SparseMatrixDIA{Tv,Ti,V},
+                            b::CuVector) where {Tv,Ti,V <: CuVector}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
-    fill!(ret, zero(Tv2))
+    fill!(ret, zero(Tv))
     function kernel_1(ret, strip, b, offset)  ## Case of offset >=0
         i = (blockIdx().x-1) * blockDim().x + threadIdx().x
         if i <= length(strip) @inbounds ret[i] += strip[i] * b[i+offset] end

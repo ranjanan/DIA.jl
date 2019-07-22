@@ -1,15 +1,15 @@
 import AlgebraicMultigrid: gs!, Sweep, Smoother, GaussSeidel, Level, extend_heirarchy!, Pinv, MultiLevel, Cycle
-import AlgebraicMultigrid: MultiLevelWorkspace, residual!, coarse_x!, coarse_b! 
+import AlgebraicMultigrid: MultiLevelWorkspace, residual!, coarse_x!, coarse_b!, V
 
 
 struct RedBlackSweep <: Sweep
 end
 GaussSeidel(rb::RedBlackSweep) = GaussSeidel(rb, 1)
 
-function (s::GaussSeidel{RedBlackSweep})(A::SparseMatrixDIA{T}, x::CuVector{T}, b::CuVector{T}, ind_red, ind_black) where {T}
+function (s::GaussSeidel{RedBlackSweep})(A::SparseMatrixDIA{T}, x::CuVector{T}, b::CuVector{T}, ind_r,  ind_b) where {T}
 	# @assert eltype(A.diags)==Pair{Int64, CuVector{T}} || ArgumentError("only CuDIA allowed") 
 	for i in 1:s.iter
-		gs!(A, b, x, ind_r, ind_b)
+		gs!(A, b, x, ind1 = ind_r, ind2 = ind_b)
 	end
 end
 
@@ -107,7 +107,7 @@ function _gs!(A::SparseMatrixDIA, b, x, ind) ## Performs GS on subset ind ⊂ 1:
     end
     _div_cuind!(x, A.diags[length(A.diags)>>1 + 1].second, ind) ### temp because length(A.diags)>>1+1 is the main diagonal
 end
-function mul!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
+function buzz!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
 	
 	function kernel(from, to, indf, indt, w)
 		i = (blockIdx().x-1) * blockDim().x + threadIdx().x		
@@ -232,6 +232,7 @@ function gmg(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg;
 
 		coarse_x!(w, size(A, 1))
         coarse_b!(w, size(A, 1))
+		residual!(w, size(A, 1))
 
     end
     
@@ -247,11 +248,13 @@ coarse_b!(w::MultiLevelWorkspace{TX,bs}, n) where {TX <: CuArray, bs} =
 coarse_x!(w::MultiLevelWorkspace{TX,bs}, n) where {TX <: CuArray, bs} = 
 	push!(w.coarse_xs, CuArrays.zeros(n))
 
+solve(ml, b::CuVector) = solve!(similar(b), ml, b) 
+
     
 """
 solve! outline
 """
-function solve!(x, ml::MultiLevel, b::CuVector{T}, fdim,
+function solve!(x, ml::MultiLevel, b::CuVector{T}, fdim, agg, 
                                     cycle::Cycle = V();
                                     maxiter::Int = 100,
                                     tol::Float64 = 1e-5,
@@ -259,11 +262,104 @@ function solve!(x, ml::MultiLevel, b::CuVector{T}, fdim,
                                     log::Bool = false,
                                     calculate_residual = true) where {T}
     #within loop
+    A = length(ml) == 1 ? ml.final_A : ml.levels[1].A
+    tol = eltype(b)(tol)
+    log && (residuals = Vector{T}())
+    normres = normb = norm(b)
+    if normb != 0
+        tol *= normb
+    end
+    log && push!(residuals, normb)
+    res = ml.workspace.res_vecs[1]
+    itr = lvl = 1
     
-    ml.presmoother(A, x, b, create_rb(fdim)...) # Maybe we can create GMGMultiLevel and store dimension information of each steps?
-    ###
-    return
+    # ml.presmoother(A, x, b, create_rb(fdim)...) # Maybe we can create GMGMultiLevel and store dimension information of each steps?
+    while itr <= maxiter && (!calculate_residual || normres > tol)
+        if length(ml) == 1
+            ml.coarse_solver(x, b)
+        else
+            __solve!(x, ml, cycle, b, lvl, fdim, agg)
+        end
+        if calculate_residual
+            mul!(res, A, x)
+            reshape(res, size(b)) .= b .- reshape(res, size(b))
+            normres = norm(res)
+            log && push!(residuals, normres)
+        end
+         itr += 1
+     end
+ 
+     # @show residuals
+     log ? (x, residuals) : x
 end
+function __solve!(x, ml, v::V, b, lvl, fdim, agg)
+
+    A = ml.levels[lvl].A
+    ml.presmoother(A, x, b, create_rb(fdim)...)
+	
+    res = ml.workspace.res_vecs[lvl]
+	# @show which(mul!, (typeof(res), typeof(A), typeof(x)))
+    buzz!(res, A, x)
+    reshape(res, size(b)) .= b .- reshape(res, size(b))
+
+    coarse_b = ml.workspace.coarse_bs[lvl]
+    buzz!(coarse_b, ml.levels[lvl].R, res)
+
+    coarse_x = ml.workspace.coarse_xs[lvl]
+    coarse_x .= 0
+    if lvl == length(ml.levels)
+        ml.coarse_solver(coarse_x, coarse_b)
+    else
+        coarse_x = __solve!(coarse_x, ml, v, coarse_b, lvl + 1, fdim, agg)
+    end
+
+    buzz!(res, ml.levels[lvl].P, coarse_x)
+    x .+= res
+
+    ml.postsmoother(A, x, b)
+
+    x
+end
+
+#=nction solve!(x, ml::MultiLevel, b::AbstractArray{T},
+                                     cycle::Cycle = V();
+                                     maxiter::Int = 100,
+                                     tol::Float64 = 1e-5,
+                                  verbose::Bool = false,
+                                     log::Bool = false,
+                                     calculate_residual = true) where {T}
+ 
+     A = length(ml) == 1 ? ml.final_A : ml.levels[1].A
+     V = promote_type(eltype(A), eltype(b))
+     tol = eltype(b)(tol)
+     log && (residuals = Vector{V}())
+     normres = normb = norm(b)
+     if normb != 0
+         tol *= normb
+     end
+     log && push!(residuals, normb)
+ 
+     res = ml.workspace.res_vecs[1]
+     itr = lvl = 1
+     while itr <= maxiter && (!calculate_residual || normres > tol)
+         if length(ml) == 1
+             ml.coarse_solver(x, b)
+         else
+             __solve!(x, ml, cycle, b, lvl)
+         end
+         if calculate_residual
+             mul!(res, A, x)
+             reshape(res, size(b)) .= b .- reshape(res, size(b))
+             normres = norm(res)
+             log && push!(residuals, normres)
+         end
+         itr += 1
+     end
+ 
+     # @show residuals
+     log ? (x, residuals) : x
+end=#
+
 
 ### Copy and Divide within specific CuArray index (CuArray of Ints, red or black)
 function _copy_cuind!(from, to, ind)
