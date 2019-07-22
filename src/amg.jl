@@ -189,7 +189,7 @@ function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, a
 	cdim = ceil.(Int, fdim ./ agg)
 	c_l  = prod(cdim)
 	c_o  = [-cdim[2]*cdim[1], -cdim[1], -1, 0, 1, cdim[1], cdim[1]*cdim[2]] ## Can't figure out how to do this generic
-	A_c  = SparseMatrixDIA([c_o[i]=>CuArrays.zeros(T, round(Int, c_l - abs(c_o[i]))) for i in 1:length(c_o)], c_l, c_l)
+	A_c  = SparseMatrixDIA([c_o[i]=>cuzeros(T, round(Int, c_l - abs(c_o[i]))) for i in 1:length(c_o)], c_l, c_l)
 	d    = length(A.diags)>>1+1 # main diag index
 	
 	# threads/blocks setup
@@ -242,11 +242,11 @@ MultiLevelWorkspace(A::SparseMatrixDIA{Tv,Ti,V}) where {Tv,Ti,V} =
 	MultiLevelWorkspace{V,Val{1}}(Vector{V}(), Vector{V}(), Vector{V}())
 
 residual!(w::MultiLevelWorkspace{TX,bs}, n) where {TX <: CuArray, bs} = 
-	push!(w.res_vecs, CuArrays.zeros(n))
+	push!(w.res_vecs, cuzeros(Float64, n))
 coarse_b!(w::MultiLevelWorkspace{TX,bs}, n) where {TX <: CuArray, bs} = 
-	push!(w.coarse_bs, CuArrays.zeros(n))
+	push!(w.coarse_bs, cuzeros(Float64, n))
 coarse_x!(w::MultiLevelWorkspace{TX,bs}, n) where {TX <: CuArray, bs} = 
-	push!(w.coarse_xs, CuArrays.zeros(n))
+	push!(w.coarse_xs, cuzeros(Float64, n))
 
 solve(ml, b::CuVector) = solve!(similar(b), ml, b) 
 
