@@ -388,3 +388,7 @@ function cudasetup(dim, numthreads)
 	
 	return threads, blocks
 end
+
+
+(p::Pinv)(x::CuVector{T}, b::CuVector{T}) where {T} = copyto!(x, CuArray(mul!(Array(x), p.pinvA, Array(b))))
+
