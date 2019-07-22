@@ -124,9 +124,9 @@ end
 function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg) where {T,TF}
 	
     fl    = prod(fdim)
-	ind_f = CuArrays.zeros(Int, fl)
-	ind_t = CuArrays.zeros(Int, fl)
-	w     = CuArrays.zeros(T, fl)
+	ind_f = cuzeros(Int, fl)
+	ind_t = cuzeros(Int, fl)
+	w     = cuzeros(T, fl)
 	
 	function kernel(ind_f, ind_t, w, fdim, agg)
 		i = (blockIdx().x-1) * blockDim().x + threadIdx().x
