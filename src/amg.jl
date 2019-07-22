@@ -15,8 +15,8 @@ end
 
 function create_rb(fdim)
     fl = prod(fdim)
-    ind_r = CuArrays.zeros(Int64, ceil(Int, fl/2))
-    ind_b = CuArrays.zeros(Int64, floor(Int, fl/2))
+    ind_r = cuzeros(Int64, ceil(Int, fl/2))
+    ind_b = cuzeros(Int64, floor(Int, fl/2))
     
     function kernel(ir, ib, fdim)
         i = (blockIdx().x-1) * blockDim().x + threadIdx().x
