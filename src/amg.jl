@@ -281,7 +281,8 @@ function solve!(x, ml::MultiLevel, b::CuVector{T}, fdim, agg,
             __solve!(x, ml, cycle, b, lvl, fdim, agg)
         end
         if calculate_residual
-            mul!(res, A, x)
+            
+            buzz!(res, A, x)
             reshape(res, size(b)) .= b .- reshape(res, size(b))
             normres = norm(res)
             log && push!(residuals, normres)
