@@ -310,7 +310,7 @@ function __solve!(x, ml, v::V, b, lvl, fdim, agg)
     if lvl == length(ml.levels)
         ml.coarse_solver(coarse_x, coarse_b)
     else
-        coarse_x = __solve!(coarse_x, ml, v, coarse_b, lvl + 1, fdim, agg)
+        coarse_x = __solve!(coarse_x, ml, v, coarse_b, lvl + 1, ceil.(Int, fdim ./ agg), agg)
     end
 
     buzz!(res, ml.levels[lvl].P, coarse_x)
