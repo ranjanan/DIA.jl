@@ -4,8 +4,7 @@ import AlgebraicMultigrid: MultiLevelWorkspace, residual!, coarse_x!, coarse_b!,
 
 struct RedBlackSweep <: Sweep
 end
-GaussSeidel(rb::RedBlackSweep) = GaussSeidel(rb, 1)
-
+GaussSeidel(rb::RedBlackSweep) = GaussSeidel(rb, 10) 
 function (s::GaussSeidel{RedBlackSweep})(A::SparseMatrixDIA{T}, x::CuVector{T}, b::CuVector{T}, ind_r,  ind_b) where {T}
 	# @assert eltype(A.diags)==Pair{Int64, CuVector{T}} || ArgumentError("only CuDIA allowed") 
 	for i in 1:s.iter
@@ -37,16 +36,16 @@ function create_rb(fdim)
 end
 
 function _gs_diag!(offset, diag, x, i)
-	if   offset < 0 
+	if   offset < 0 && i+offset>0
 		x[i] -= diag[i+offset] * x[i+offset] ## i+offset should be >0
-    else 
+    elseif offset >= 0 && i+offset<=length(x) && i<=length(diag)
 		x[i] -= diag[i] * x[i+offset] 
 	end   ## i+offset should be <=length(n)
 end
 
 function _gs_kernel!(offset, diag, x, ind)
 	i = (blockIdx().x-1) * blockDim().x + threadIdx().x
-    if i<=length(ind) && ind[i]+offset>0 && ind[i]+offset<=length(x) 
+    if i<=length(ind) 
 		_gs_diag!(offset, diag, x, ind[i]) 
 	end
 
@@ -64,7 +63,6 @@ function _gs!(A::SparseMatrixDIA, b, x, ind) ## Performs GS on subset ind ⊂ 1:
 	end
     _div_cuind!(x, A.diags[length(A.diags)>>1 + 1].second, ind) ### temp because length(A.diags)>>1+1 is the main diagonal
 end
-
 function gs!(A::SparseMatrixDIA, b::CuVector, x::CuVector; ind1=CuArray(1:2:length(b)), ind2=CuArray(2:2:length(b)))
 	_gs!(A, b, x, ind1)
 	_gs!(A, b, x, ind2)
@@ -97,18 +95,8 @@ struct PR_op{T}
 	ind_to::AbstractVector{Int64}
 	weights::AbstractVector{T} ## All three vectors should have same length(length of finer grid)
 end
-function _gs!(A::SparseMatrixDIA, b, x, ind) ## Performs GS on subset ind ⊂ 1:length(x), ind must be CuArray
-    n = length(ind)
-    _copy_cuind!(b, x, ind)
-    for i in 1:length(A.diags)
-            if A.diags[i].first != 0
-                    @cuda threads=64 blocks=ceil(Int, n/64) _gs_kernel!(A.diags[i].first, A.diags[i].second, x, ind)
-            end
-    end
-    _div_cuind!(x, A.diags[length(A.diags)>>1 + 1].second, ind) ### temp because length(A.diags)>>1+1 is the main diagonal
-end
 function buzz!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
-	
+	fill!(to, zero(T))
 	function kernel(from, to, indf, indt, w)
 		i = (blockIdx().x-1) * blockDim().x + threadIdx().x		
 		if i<=length(indf)
@@ -127,8 +115,9 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg) wher
 	ind_f = cuzeros(Int, fl)
 	ind_t = cuzeros(Int, fl)
 	w     = cuzeros(T, fl)
-	
-	function kernel(ind_f, ind_t, w, fdim, agg)
+	w2    = cuzeros(T, fl)
+
+	function kernel(ind_f, ind_t, w, w2, fdim, agg)
 		i = (blockIdx().x-1) * blockDim().x + threadIdx().x
 		
         if i <= prod(fdim)	
@@ -139,15 +128,16 @@ function gmg_interpolation(A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, agg) wher
 			ind_f[i] = i # line_f = i
 			ind_t[i] = line_c
 			w[i] = 1.0 # https://calcul.math.cnrs.fr/attachments/spip/IMG/pdf/aggamgtut_notay.pdf page 56
-		end
+		    w2[i] = 1.0
+        end
 
 		return nothing
 	end
 	
 	# thread/block setup
-	@cuda threads=256 blocks=ceil(Int, fl/256) kernel(ind_f, ind_t, w, fdim, agg)
+	@cuda threads=256 blocks=ceil(Int, fl/256) kernel(ind_f, ind_t, w, w2, fdim, agg)
 
-	P = PR_op(ind_t, ind_f, w)
+	P = PR_op(ind_t, ind_f, w2)
 	R = PR_op(ind_f, ind_t, w)
 
 	return P, R
@@ -294,7 +284,6 @@ function solve!(x, ml::MultiLevel, b::CuVector{T}, fdim, agg,
      log ? (x, residuals) : x
 end
 function __solve!(x, ml, v::V, b, lvl, fdim, agg)
-
     A = ml.levels[lvl].A
     ml.presmoother(A, x, b, create_rb(fdim)...)
 	
@@ -302,10 +291,8 @@ function __solve!(x, ml, v::V, b, lvl, fdim, agg)
 	# @show which(mul!, (typeof(res), typeof(A), typeof(x)))
     buzz!(res, A, x)
     reshape(res, size(b)) .= b .- reshape(res, size(b))
-
     coarse_b = ml.workspace.coarse_bs[lvl]
     buzz!(coarse_b, ml.levels[lvl].R, res)
-
     coarse_x = ml.workspace.coarse_xs[lvl]
     coarse_x .= 0
     if lvl == length(ml.levels)
@@ -391,5 +378,6 @@ function cudasetup(dim, numthreads)
 end
 
 
-(p::Pinv)(x::CuVector{T}, b::CuVector{T}) where {T} = copyto!(x, CuArray(mul!(Array(x), p.pinvA, Array(b))))
-
+function (p::Pinv)(x::CuVector{T}, b::CuVector{T}) where {T}
+    return copyto!(x, CuArray(mul!(Array(x), p.pinvA, Array(b))))
+end
