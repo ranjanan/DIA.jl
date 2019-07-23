@@ -1,6 +1,6 @@
 import AlgebraicMultigrid: gs!, Sweep, Smoother, GaussSeidel, Level, extend_heirarchy!, Pinv, MultiLevel, Cycle
 import AlgebraicMultigrid: MultiLevelWorkspace, residual!, coarse_x!, coarse_b!, V
-
+import LinearAlgebra: mul!
 
 struct RedBlackSweep <: Sweep
 end
@@ -95,8 +95,9 @@ struct PR_op{T}
 	ind_to::AbstractVector{Int64}
 	weights::AbstractVector{T} ## All three vectors should have same length(length of finer grid)
 end
-function buzz!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
-	fill!(to, zero(T))
+
+function mul!(to::CuVector{T}, P::PR_op, from::CuVector{T}) where {T}
+  fill!(to, zero(T))
 	function kernel(from, to, indf, indt, w)
 		i = (blockIdx().x-1) * blockDim().x + threadIdx().x		
 		if i<=length(indf)
@@ -184,7 +185,6 @@ function extend_heirarchy!(levels, A::SparseMatrixDIA{T,TF,CuVector{T}}, fdim, a
 	
 	# threads/blocks setup
 		
-
 	for i in 1:length(A.diags)
 		@cuda threads=256 blocks=ceil(Int, length(A.diags[i].second)/256)  gmg_PAP_diag(A.diags[i].first,
 																						A.diags[i].second, 
@@ -272,7 +272,7 @@ function solve!(x, ml::MultiLevel, b::CuVector{T}, fdim, agg,
         end
         if calculate_residual
             
-            buzz!(res, A, x)
+            mul!(res, A, x)
             reshape(res, size(b)) .= b .- reshape(res, size(b))
             normres = norm(res)
             log && push!(residuals, normres)
@@ -289,10 +289,10 @@ function __solve!(x, ml, v::V, b, lvl, fdim, agg)
 	
     res = ml.workspace.res_vecs[lvl]
 	# @show which(mul!, (typeof(res), typeof(A), typeof(x)))
-    buzz!(res, A, x)
+    mul!(res, A, x)
     reshape(res, size(b)) .= b .- reshape(res, size(b))
     coarse_b = ml.workspace.coarse_bs[lvl]
-    buzz!(coarse_b, ml.levels[lvl].R, res)
+    mul!(coarse_b, ml.levels[lvl].R, res)
     coarse_x = ml.workspace.coarse_xs[lvl]
     coarse_x .= 0
     if lvl == length(ml.levels)
@@ -301,7 +301,7 @@ function __solve!(x, ml, v::V, b, lvl, fdim, agg)
         coarse_x = __solve!(coarse_x, ml, v, coarse_b, lvl + 1, ceil.(Int, fdim ./ agg), agg)
     end
 
-    buzz!(res, ml.levels[lvl].P, coarse_x)
+    mul!(res, ml.levels[lvl].P, coarse_x)
     x .+= res
 
     ml.postsmoother(A, x, b)

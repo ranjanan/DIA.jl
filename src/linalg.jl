@@ -1,6 +1,8 @@
 # Matvec
-function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,V},
-                            b::Vector{Tv2}) where {Tv1,Tv2, Ti,N,V<:DenseVector}
+import LinearAlgebra: mul!
+
+function mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,V}, 
+				b::Vector{Tv2}) where {Tv1,Tv2, Ti,N, V<:Vector}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
     fill!(ret, zero(Tv2))
@@ -21,7 +23,7 @@ function LinearAlgebra.mul!(ret::Vector{Tv2}, S::SparseMatrixDIA{Tv1,Ti,V},
     ret
 end
 # GPU mul!
-function buzz!(ret::CuVector, S::SparseMatrixDIA{Tv,Ti,V},
+function mul!(ret::CuVector, S::SparseMatrixDIA{Tv,Ti,V},
                             b::CuVector) where {Tv,Ti,V <: CuVector}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
     d = S.diags
@@ -49,42 +51,7 @@ function buzz!(ret::CuVector, S::SparseMatrixDIA{Tv,Ti,V},
     ret
 end
 
-#=function dot_add_with_offset1!(y, x, z, c, alpha=1., beta=1.)
-    index = threadIdx().x
-    stride = blockDim().x
-    for i = index:stride:length(x)
-        @inbounds y[i] = beta * y[i] + alpha * x[i] * z[i+c]
-    end
-    return nothing
-end
-function dot_add_with_offset2!(y, x, z, c, alpha=1., beta=1.0)
-    index = threadIdx().x
-    stride = blockDim().x
-    for i = index:stride:length(x)
-        @inbounds y[i-c] = beta * y[i-c] + alpha* x[i] * z[i]
-    end
-    return nothing
-end
-
-# If you change the variable names, it gives me compilation error. Strange.
-function dot_add_with_offset1!(ret, s, b)
-    index = threadIdx().s    # this example only requires linear indexing, so just use `x`
-    stride = blockDim().s
-    for i = index:stride:length(s)
-        @inbounds ret[i] += s[i] * b[i]
-    end
-    return nothing
-end
-function dot_add_with_offset2!(ret, s, b, offset)::nothing
-    index = (blockIdx().s - 1) * blockDim().s + threadIdx().s
-    stride = blockDim().s * gridDim().s
-    for i = index:stride:length(s)
-        @inbounds ret[i-offset] += s[i] * b[i]
-    end
-    return nothing
-end=#
-
-
+# Sparse Vector
 function LinearAlgebra.mul!(ret::Vector{Tv}, S::SparseMatrixDIA{Tv,Ti,V},
                             b::Vector{Tv}) where {Tv,Ti,V<:SparseVector}
     @assert S.n == length(b) || throw(DimensionMismatch("Matrix - vector sizes do not match"))
